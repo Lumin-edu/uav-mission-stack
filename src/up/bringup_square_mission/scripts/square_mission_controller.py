@@ -218,6 +218,7 @@ class SquareMissionController(Node):
             SquareWaypoint(side, side, z, "front_right_corner"),
             SquareWaypoint(side, 0.0, z, "rear_right_corner"),
             SquareWaypoint(0.0, 0.0, z, "return_takeoff_hover"),
+            SquareWaypoint(0.0, 0.0, 0.0, "land_at_origin"),
         ]
 
     def vehicle_local_position_callback(self, msg: VehicleLocalPosition) -> None:
@@ -326,7 +327,7 @@ class SquareMissionController(Node):
         if not self.completion_logged:
             self.completion_logged = True
             self.get_logger().info(
-                "Square mission completed. Holding final takeoff-above setpoint."
+                "Square mission completed. Holding final origin landing setpoint."
             )
 
     def hold_seconds_for_active_waypoint(self) -> float:

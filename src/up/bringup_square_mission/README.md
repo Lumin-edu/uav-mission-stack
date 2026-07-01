@@ -55,6 +55,7 @@ ros2 launch hx_bringup_square_mission square_mission_hw.launch.py \
 3.  (1.0, 1.0, 0.30) 右侧 1m
 4.  (1.0, 0.0, 0.30) 后退 1m
 5.  (0.0, 0.0, 0.30) 回到起飞点上方
+6.  (0.0, 0.0, 0.00) 下降回任务原点
 ```
 
 坐标约定：
@@ -89,7 +90,7 @@ Point-LIO 点云通过 `/fmu/in/vehicle_visual_odometry` 输入 PX4；光流/定
 连续稳定 stable_time_sec   默认 0.6 s
 ```
 
-到起飞高度后悬停 `takeoff_hover_sec`，默认 0.6s；每个角点悬停 `corner_hover_sec`，默认 0.6s；最后回到起飞点上方后保持 `final_hover_sec`，默认 0.6s，然后继续发布最终悬停 setpoint。
+到起飞高度后悬停 `takeoff_hover_sec`，默认 0.6s；每个角点悬停 `corner_hover_sec`，默认 0.6s；最后下降回任务原点后保持 `final_hover_sec`，默认 0.6s，然后继续发布最终原点 setpoint。这个下降动作不会自动 disarm，落地后的锁定/停桨仍按手动流程处理。
 
 ## 飞前检查
 
