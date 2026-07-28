@@ -5,7 +5,9 @@
 当前重点入口：
 
 ```text
-src/up/bringup_pointlio_hover
+src/up/bringup_pointlio_hover  # 定点悬停
+src/up/bringup_square_mission  # 正方形航点
+src/up/bringup_ego             # EGO 自主避障
 ```
 
 本仓库暂不包含以下内容：
@@ -31,8 +33,13 @@ uav-mission-stack/
 │   │   └── FAST_LIO/                 # 保留的 FAST-LIO ROS 2 上游包
 │   ├── control/
 │   │   └── px4_msgs/                 # PX4 1.14 对应 ROS 2 消息定义
+│   ├── planning/
+│   │   └── ego-planner-swarm/         # EGO-Planner EGO 规划器 ROS 2 (ros2_version 分支)
 │   └── up/
-│       └── bringup_pointlio_hover/   # 本项目：Point-LIO + PX4 定点悬停
+│       ├── bringup_pointlio_hover/    # 本项目：Point-LIO + PX4 定点悬停
+│       ├── bringup_square_mission/    # 本项目：正方形航点任务
+│       ├── bringup_full_mission/      # 本项目：完整联合任务
+│       └── bringup_ego/              # 本项目：EGO 自主避障
 └── README.md
 ```
 
@@ -46,6 +53,7 @@ uav-mission-stack/
 | `src/perception/Point-LIO` | 当前定位主链路，输出 `/odom` | [HY-LiYihan/Point-LIO](https://github.com/HY-LiYihan/Point-LIO)；原始项目见 [hku-mars/Point-LIO](https://github.com/hku-mars/Point-LIO) | `main@f374d76` |
 | `src/perception/FAST_LIO` | 保留的 FAST-LIO ROS 2 包，用于历史方案/对照调试 | [hku-mars/FAST_LIO](https://github.com/hku-mars/FAST_LIO) | `ROS2@a4743b0` |
 | `src/control/px4_msgs` | PX4 uORB 的 ROS 2 消息定义，本地使用 PX4 1.14 对应分支 | [PX4/px4_msgs](https://github.com/PX4/px4_msgs) | `release/1.14@ffb6e80` |
+| `src/planning/ego-planner-swarm` | EGO 规划器，支持局部 B-spline 轨迹优化与避障 | [ZJU-FAST-Lab/ego-planner-swarm](https://github.com/ZJU-FAST-Lab/ego-planner-swarm) | `ros2_version@23a8d5a` |
 
 `px4_msgs` 必须和飞控固件版本匹配。本项目当前按 PX4 `1.14` 使用；如果飞控升级，先同步检查 `src/control/px4_msgs` 分支和消息定义。
 
@@ -89,7 +97,7 @@ Micro XRCE-DDS Agent
 进入工作空间根目录：
 
 ```bash
-cd /home/venom/venom
+cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
 ```
 
