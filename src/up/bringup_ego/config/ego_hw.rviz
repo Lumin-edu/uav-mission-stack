@@ -1,0 +1,115 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Ground Grid 
+      Plane: XY
+      Plane Cell Count: 30
+      Cell Size: 1
+      Color: 120; 120; 120
+      Alpha: 0.45
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Point-LIO Registered Cloud
+      Topic: /cloud_registered
+      Queue Size: 10
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 255; 170; 0
+      Alpha: 0.9
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: false
+      Name: Point-LIO Map
+      Topic: /map_cloud
+      Queue Size: 5
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 110; 150; 255
+      Alpha: 0.35
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: EGO Inflated Occupancy
+      Topic: /ego/grid_map/occupancy_inflate
+      Queue Size: 10
+      Size (Pixels): 3
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 255; 60; 60
+      Alpha: 0.75
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Point-LIO Odometry
+      Topic: /odom
+      Keep: 1
+      Shape:
+        Value: Axes
+        Axes Length: 0.65
+        Axes Radius: 0.04
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Point-LIO Path
+      Topic: /path
+      Line Style: Lines
+      Line Width: 0.05
+      Color: 255; 210; 50
+      Alpha: 0.9
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: EGO Goal
+      Topic: /goal_point
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: EGO Global Path
+      Topic: /global_list
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: EGO Initial Path
+      Topic: /init_list
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: EGO Optimized Path
+      Topic: /optimal_list
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Frame Timeout: 15
+      Marker Scale: 0.7
+      Show Axes: true
+      Show Names: true
+  Enabled: true
+  Global Options:
+    Background Color: 25; 25; 30
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /move_base_simple/goal
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 15
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1
+      Pitch: 0.8
+      Yaw: 0.8
+  Window Geometry:
+    Height: 900
+    Width: 1500
+    X: 50
+    Y: 50
