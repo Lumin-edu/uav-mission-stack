@@ -1,4 +1,18 @@
 // #include <fstream>
+/**
+ * EGOPlannerManager — 规划管理器：全局规划 + 局部轨迹优化
+ *
+ * 核心方法：
+ *   planGlobalTraj: 从当前位置到目标的全局多项式轨迹 (FSM 触发)
+ *   reboundReplan: 局部轨迹重规划和优化 (三步: INIT → OPTIMIZE → REFINE)
+ *   EmergencyStop: 碰撞急停 (生成零速度悬停轨迹)
+ *   checkCollision: 集群多机碰撞检测
+ *
+ * 数据流：
+ *   EGOReplanFSM (状态机) → planGlobalTraj → reboundReplan → BsplineOptimizer
+ *                         → 输出 B-spline 控制点 → 发布到 planning/bspline
+ */
+
 #include <ego_planner/planner_manager.h>
 #include <thread>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo

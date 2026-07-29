@@ -5,16 +5,18 @@ EGO 自主避障硬件启动文件。
   1. Livox MID-360 激光雷达驱动
   2. Point-LIO 建图（里程计 + 点云）
   3. Point-LIO → PX4 视觉里程计桥接
-  4. EGO 规划器 + 轨迹服务器
-  5. ego_px4_bridge：EGO → PX4 Offboard 控制桥接
-  6. startup_goal：启动时发布初始目标
-  7. ego_hw_monitor：硬件管线诊断
-  8. PX4 DDS 监控 + 控制看门狗 + 位置对比
+  4. 规划高度融合：Point-LIO XY/姿态 + PX4 测距融合 Z/VZ
+  5. EGO 规划器 + 轨迹服务器
+  6. ego_px4_bridge：EGO → PX4 Offboard 控制桥接
+  7. startup_goal：启动时发布初始目标
+  8. ego_hw_monitor：硬件管线诊断
+  9. PX4 DDS 监控 + 控制看门狗 + 位置对比
 
 完整数据流：
   Livox /livox/lidar + /livox/imu
     → Point-LIO /odom + /cloud_registered
-    → (visual odom bridge) → PX4 EKF2
+    → (verified visual odom bridge) → PX4 EKF2 horizontal position
+    → (planner altitude fusion + PX4 range-aided z) → /ego/odom_fused
     → (EGO planner) → /ego/position_cmd
     → (ego_px4_bridge) → PX4 TrajectorySetpoint
 
@@ -42,8 +44,10 @@ def generate_launch_description():
     pointlio_share = get_package_share_directory("point_lio")
     livox_share = get_package_share_directory("livox_ros_driver2")
 
-    odom_topic = LaunchConfiguration("odom_topic")
-    cloud_topic = LaunchConfiguration("cloud_topic")
+    raw_odom_topic = LaunchConfiguration("odom_topic")
+    raw_cloud_topic = LaunchConfiguration("cloud_topic")
+    planner_odom_topic = LaunchConfiguration("planner_odom_topic")
+    planner_cloud_topic = LaunchConfiguration("planner_cloud_topic")
 
     # ========== Node 1: Livox MID-360 激光雷达驱动 ==========
     livox_driver = IncludeLaunchDescription(
@@ -74,7 +78,7 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("use_pointlio_px4_visual_odom")),
         parameters=[
             {
-                "pointlio_topic": odom_topic,
+                "pointlio_topic": raw_odom_topic,
                 "px4_local_topic": "/fmu/out/vehicle_local_position",
                 "timesync_topic": "/fmu/out/timesync_status",
                 "output_topic": "/fmu/in/vehicle_visual_odometry",
@@ -102,7 +106,34 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 4: EGO 规划器 ==========
+    # ========== Node 4: Point-LIO XY + PX4 range-aided Z for EGO ==========
+    # This adapter is planning-only. The verified Point-LIO -> PX4 visual odom
+    # path above remains connected to raw Point-LIO and is not modified.
+    planner_altitude_fusion = Node(
+        package="hx_bringup_ego",
+        executable="planner_altitude_fusion.py",
+        name="planner_altitude_fusion",
+        output="screen",
+        parameters=[
+            {
+                "raw_odom_topic": raw_odom_topic,
+                "raw_cloud_topic": raw_cloud_topic,
+                "px4_position_topic": "/fmu/out/vehicle_local_position",
+                "fused_odom_topic": planner_odom_topic,
+                "fused_cloud_topic": planner_cloud_topic,
+                "health_topic": "/ego/height_fusion_healthy",
+                "correction_topic": "/ego/pointlio_z_correction",
+                "require_rangefinder": LaunchConfiguration("require_rangefinder_height"),
+                "max_px4_age_sec": 0.30,
+                "max_odom_age_sec": 0.30,
+                "max_correction_age_sec": 0.30,
+                "max_abs_correction_m": 3.0,
+                "print_rate_hz": 1.0,
+            }
+        ],
+    )
+
+    # ========== Node 5: EGO 规划器 ==========
     # 使用 EGO-Planner 进行局部轨迹规划与避障
     # 关键 remap：odom_world → Point-LIO /odom, grid_map/cloud → /cloud_registered
     planner = Node(
@@ -127,9 +158,9 @@ def generate_launch_description():
             },
         ],
         remappings=[
-            ("odom_world", odom_topic),
-            ("grid_map/odom", odom_topic),
-            ("grid_map/cloud", cloud_topic),
+            ("odom_world", planner_odom_topic),
+            ("grid_map/odom", planner_odom_topic),
+            ("grid_map/cloud", planner_cloud_topic),
             ("planning/bspline", "/ego/planning/bspline"),
             ("planning/data_display", "/ego/planning/data_display"),
             ("planning/broadcast_bspline_from_planner", "/ego/broadcast_bspline"),
@@ -138,7 +169,7 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 5: EGO 轨迹服务器 ==========
+    # ========== Node 6: EGO 轨迹服务器 ==========
     # 将规划器输出的 B-spline 轨迹采样为 100Hz PositionCommand
     trajectory_server = Node(
         package="ego_planner",
@@ -152,7 +183,7 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 6: EGO → PX4 桥接（核心） ==========
+    # ========== Node 7: EGO → PX4 桥接（核心） ==========
     # 将 EGO 的 PositionCommand 转换为 PX4 NED 的 TrajectorySetpoint
     # 管理完整的起飞流程：prestream → 解锁 → Offboard → 起飞 → EGO 控制
     px4_bridge = Node(
@@ -163,7 +194,8 @@ def generate_launch_description():
         parameters=[
             {
                 "ego_command_topic": "/ego/position_cmd",
-                "ego_odom_topic": odom_topic,
+                "ego_odom_topic": planner_odom_topic,
+                "localization_health_topic": "/ego/height_fusion_healthy",
                 "output_enabled": LaunchConfiguration("output_enabled"),
                 "hardware_confirmation": LaunchConfiguration("hardware_confirmation"),
                 "auto_arm": LaunchConfiguration("auto_arm"),
@@ -201,7 +233,7 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 7: 启动目标发布 ==========
+    # ========== Node 8: 启动目标发布 ==========
     # 起飞完成后向 EGO 规划器发布初始目标航点，触发轨迹规划
     startup_goal = Node(
         package="hx_bringup_ego",
@@ -212,7 +244,7 @@ def generate_launch_description():
         parameters=[
             {
                 "goal_topic": "/move_base_simple/goal",
-                "odom_topic": odom_topic,
+                "odom_topic": planner_odom_topic,
                 "frame_id": LaunchConfiguration("map_frame"),
                 "goal_x": ParameterValue(LaunchConfiguration("goal_x"), value_type=float),
                 "goal_y": ParameterValue(LaunchConfiguration("goal_y"), value_type=float),
@@ -234,9 +266,11 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "odom_topic": odom_topic,
-                "cloud_topic": cloud_topic,
+                "odom_topic": planner_odom_topic,
+                "cloud_topic": planner_cloud_topic,
                 "command_topic": "/ego/position_cmd",
+                "height_fusion_health_topic": "/ego/height_fusion_healthy",
+                "require_rangefinder": LaunchConfiguration("require_rangefinder_height"),
                 "max_odom_age_sec": 0.30,
                 "max_cloud_age_sec": 0.50,
                 "max_command_age_sec": 0.30,
@@ -271,7 +305,7 @@ def generate_launch_description():
         parameters=[
             {
                 "px4_topic": "/fmu/out/vehicle_local_position",
-                "pointlio_topic": odom_topic,
+                "pointlio_topic": raw_odom_topic,
                 "print_rate": 2.0,
             }
         ],
@@ -297,19 +331,24 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("odom_topic", default_value="/odom"),
             DeclareLaunchArgument("cloud_topic", default_value="/cloud_registered"),
+            DeclareLaunchArgument("planner_odom_topic", default_value="/ego/odom_fused"),
+            DeclareLaunchArgument(
+                "planner_cloud_topic", default_value="/ego/cloud_registered_fused"
+            ),
+            DeclareLaunchArgument("require_rangefinder_height", default_value="true"),
             DeclareLaunchArgument("map_frame", default_value="odom"),
             DeclareLaunchArgument(
                 "planner_config",
                 default_value=os.path.join(ego_hw_share, "config", "ego_planner_hw.yaml"),
             ),
-            DeclareLaunchArgument("goal_x", default_value="1.0"),
-            DeclareLaunchArgument("goal_y", default_value="0.0"),
-            DeclareLaunchArgument("goal_z", default_value="0.5"),
+            DeclareLaunchArgument("goal_x", default_value="2.0"),
+            DeclareLaunchArgument("goal_y", default_value="2.0"),
+            DeclareLaunchArgument("goal_z", default_value="0.7"),
             DeclareLaunchArgument("goal_yaw", default_value="0.0"),
             DeclareLaunchArgument("start_with_goal", default_value="true"),
             DeclareLaunchArgument("startup_goal_delay_sec", default_value="3.0"),
             DeclareLaunchArgument("takeoff_before_ego", default_value="true"),
-            DeclareLaunchArgument("takeoff_altitude", default_value="0.40"),
+            DeclareLaunchArgument("takeoff_altitude", default_value="0.30"),
             DeclareLaunchArgument("takeoff_vertical_speed", default_value="0.20"),
             DeclareLaunchArgument("takeoff_reach_xy_tol", default_value="0.20"),
             DeclareLaunchArgument("takeoff_reach_z_tol", default_value="0.10"),
@@ -336,10 +375,11 @@ def generate_launch_description():
             DeclareLaunchArgument("use_px4_monitor", default_value="false"),
             DeclareLaunchArgument("use_px4_control_watchdog", default_value="true"),
             DeclareLaunchArgument("use_position_compare", default_value="false"),
-            DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("use_rviz", default_value="false"),
             livox_driver,
             pointlio,
             pointlio_to_px4,
+            planner_altitude_fusion,
             planner,
             trajectory_server,
             px4_bridge,

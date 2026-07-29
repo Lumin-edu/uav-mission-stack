@@ -123,6 +123,9 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_topic = str(
             self.declare_parameter("takeoff_ready_topic", "/ego/takeoff_ready").value
         )
+        self.localization_health_topic = str(
+            self.declare_parameter("localization_health_topic", "").value
+        )
         if self.control_mode not in {"position", "velocity"}:
             raise ValueError("control_mode must be 'position' or 'velocity'")
         if self.offboard_prestream_sec <= 0.0:
@@ -241,6 +244,15 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_pub = self.create_publisher(
             Bool, self.takeoff_ready_topic, ready_qos
         )
+        self.localization_health_required = bool(self.localization_health_topic)
+        self.localization_healthy = not self.localization_health_required
+        if self.localization_health_required:
+            self.create_subscription(
+                Bool,
+                self.localization_health_topic,
+                self.localization_health_callback,
+                ready_qos,
+            )
 
         # ========== 订阅话题 ==========
         self.create_subscription(
@@ -261,6 +273,7 @@ class EgoPx4Bridge(Node):
         self.latest_ego_odom_sec: Optional[float] = None
         self.latest_px4_position: Optional[VehicleLocalPosition] = None  # 最新PX4本地位置
         self.latest_vehicle_status: Optional[VehicleStatus] = None       # 最新PX4状态
+        self.last_px4_z_reset_counter: Optional[int] = None
         # 参考原点（EGO世界系与PX4 NED系的对齐基准）
         self.reference_world: Optional[tuple[float, float, float]] = None
         self.reference_px4: Optional[tuple[float, float, float]] = None
@@ -307,14 +320,62 @@ class EgoPx4Bridge(Node):
         self.latest_command = msg
         self.latest_command_sec = self.now_sec()
 
+    def localization_health_callback(self, msg: Bool) -> None:
+        was_healthy = self.localization_healthy
+        self.localization_healthy = bool(msg.data)
+        if was_healthy and not self.localization_healthy:
+            self.get_logger().error(
+                "Planner altitude fusion is unhealthy; new EGO trajectory execution is inhibited."
+            )
+
     def ego_odom_callback(self, msg: Odometry) -> None:
         self.latest_ego_odom = msg
         self.latest_ego_odom_sec = self.now_sec()
         self.try_capture_reference()
 
     def px4_position_callback(self, msg: VehicleLocalPosition) -> None:
+        reset_counter = int(msg.z_reset_counter)
+        if self.last_px4_z_reset_counter is None:
+            self.last_px4_z_reset_counter = reset_counter
+        elif reset_counter != self.last_px4_z_reset_counter:
+            delta_z = float(msg.delta_z)
+            if math.isfinite(delta_z):
+                self.apply_px4_z_reset(delta_z)
+            self.last_px4_z_reset_counter = reset_counter
         self.latest_px4_position = msg
         self.try_capture_reference()
+
+    def apply_px4_z_reset(self, delta_z: float) -> None:
+        """Move stored NED setpoints with a PX4 vertical-origin reset."""
+        if self.reference_px4 is not None:
+            self.reference_px4 = (
+                self.reference_px4[0],
+                self.reference_px4[1],
+                self.reference_px4[2] + delta_z,
+            )
+        if self.takeoff_origin_ned is not None:
+            self.takeoff_origin_ned = (
+                self.takeoff_origin_ned[0],
+                self.takeoff_origin_ned[1],
+                self.takeoff_origin_ned[2] + delta_z,
+            )
+        if self.takeoff_target_ned is not None:
+            self.takeoff_target_ned = (
+                self.takeoff_target_ned[0],
+                self.takeoff_target_ned[1],
+                self.takeoff_target_ned[2] + delta_z,
+            )
+        if self.takeoff_command_ned is not None:
+            self.takeoff_command_ned[2] += delta_z
+        if self.hold_position_ned is not None:
+            self.hold_position_ned = (
+                self.hold_position_ned[0],
+                self.hold_position_ned[1],
+                self.hold_position_ned[2] + delta_z,
+            )
+        self.get_logger().warn(
+            f"PX4 z reset detected; shifted stored NED setpoints by {delta_z:+.3f} m."
+        )
 
     def vehicle_status_callback(self, msg: VehicleStatus) -> None:
         self.latest_vehicle_status = msg
@@ -342,6 +403,8 @@ class EgoPx4Bridge(Node):
         同时初始化起飞原点和目标（target = origin - takeoff_altitude）。
         """
         if self.reference_world is not None or self.latest_ego_odom is None:
+            return
+        if not self.localization_healthy:
             return
         if self.now_sec() < self.reference_capture_ready_sec:
             return
@@ -727,6 +790,12 @@ class EgoPx4Bridge(Node):
         """
         # 步骤1：硬件安全门检查
         if not self.output_permitted:
+            return
+        if not self.localization_healthy:
+            if self.reference_world is not None:
+                self.publish_hold("Planner altitude fusion is unhealthy")
+            else:
+                self.warn_waiting("Waiting for healthy planner altitude fusion")
             return
         # 步骤2：等待参考原点
         if self.reference_world is None:

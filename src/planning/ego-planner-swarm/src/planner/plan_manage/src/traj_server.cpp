@@ -1,3 +1,19 @@
+/**
+ * traj_server: B-spline 轨迹 → PositionCommand 采样节点
+ *
+ * 核心功能：
+ *   1. 接收 EGO 规划器输出的 B-spline 轨迹 (planning/bspline)
+ *   2. 100Hz 定时采样 B-spline，输出位置+速度+加速度
+ *   3. 根据轨迹方向自动计算期望偏航角(yaw)
+ *   4. 轨迹结束后悬停在终点，等待新轨迹
+ *
+ * 数据流：
+ *   /ego/planning/bspline (Bspline msg)
+ *     → bsplineCallback: 解析为 UniformBspline 对象
+ *     → cmdCallback (100Hz): 采样位置/速度/加速度 + 计算yaw
+ *     → /ego/position_cmd (PositionCommand msg) → ego_px4_bridge
+ */
+
 #include "bspline_opt/uniform_bspline.h"
 #include "nav_msgs/msg/odometry.hpp"
 #include "traj_utils/msg/bspline.hpp"
@@ -26,7 +42,14 @@ double time_forward_;
 
 void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 {
-  // parse pos traj
+  /**
+   * B-spline 轨迹回调：将 ROS 消息解析为内部 UniformBspline 对象。
+   * 一条 B-spline 拆分为三条子曲线：
+   *   traj_[0]: 位置 B-spline (3阶) — 采样得到 pos
+   *   traj_[1]: 速度 B-spline (2阶, 位置的导数) — 采样得到 vel
+   *   traj_[2]: 加速度 B-spline (1阶, 速度的导数) — 采样得到 acc
+   */
+  // parse pos traj — 解析位置控制点和节点向量
 
   Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
 
@@ -43,25 +66,17 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
     pos_pts(2, i) = msg->pos_pts[i].z;
   }
 
+  // 构建位置 B-spline
   UniformBspline pos_traj(pos_pts, msg->order, 0.1);
   pos_traj.setKnot(knots);
-
-  // parse yaw traj
-
-  // Eigen::MatrixXd yaw_pts(msg->yaw_pts.size(), 1);
-  // for (int i = 0; i < msg->yaw_pts.size(); ++i) {
-  //   yaw_pts(i, 0) = msg->yaw_pts[i];
-  // }
-
-  // UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
   start_time_ = msg->start_time;
   traj_id_ = msg->traj_id;
 
   traj_.clear();
-  traj_.push_back(pos_traj);
-  traj_.push_back(traj_[0].getDerivative());
-  traj_.push_back(traj_[1].getDerivative());
+  traj_.push_back(pos_traj);                  // [0] 位置 B-spline
+  traj_.push_back(traj_[0].getDerivative());  // [1] 速度 = 位置的一阶导数
+  traj_.push_back(traj_[1].getDerivative());  // [2] 加速度 = 速度的一阶导数
 
   traj_duration_ = traj_[0].getTimeSum();
 
@@ -162,6 +177,14 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 
 void cmdCallback()
 {
+  /**
+   * 100Hz 定时回调：采样 B-spline 并发布 PositionCommand。
+   *
+   * 三段逻辑：
+   *   1. t_cur 在轨迹时间内 → 采样位置/速度/加速度 + 计算 yaw
+   *   2. t_cur 超过轨迹终点 → 悬停在终点 (vel=0, acc=0, yaw 保持)
+   *   3. t_cur < 0 → 无效时间，打印警告
+   */
   /* no publishing before receive traj_ */
   if (!receive_traj_)
     return;
@@ -177,9 +200,10 @@ void cmdCallback()
   static rclcpp::Time time_last = clock.now();
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
-    pos = traj_[0].evaluateDeBoorT(t_cur);
-    vel = traj_[1].evaluateDeBoorT(t_cur);
-    acc = traj_[2].evaluateDeBoorT(t_cur);
+    // ===== 轨迹执行中：逐帧采样 B-spline =====
+    pos = traj_[0].evaluateDeBoorT(t_cur);   // 位置
+    vel = traj_[1].evaluateDeBoorT(t_cur);   // 速度
+    acc = traj_[2].evaluateDeBoorT(t_cur);   // 加速度
 
     /*** calculate yaw ***/
     yaw_yawdot = calculate_yaw(t_cur, pos, time_now, time_last);
@@ -190,6 +214,7 @@ void cmdCallback()
   }
   else if (t_cur >= traj_duration_)
   {
+    // ===== 轨迹结束：悬停在终点 =====
     /* hover when finish traj_ */
     pos = traj_[0].evaluateDeBoorT(traj_duration_);
     vel.setZero();

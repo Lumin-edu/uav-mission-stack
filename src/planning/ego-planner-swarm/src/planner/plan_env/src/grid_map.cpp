@@ -3,6 +3,17 @@
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
 // #define last_img_ md_.depth_image_[!(image_cnt_ & 1)]
 
+/**
+ * GridMap — 栅格地图：点云 → 占用栅格 + 碰撞检测
+ *
+ * 核心管线：
+ *   1. raycastProcess: 将 Point-LIO 点云投射到栅格地图，更新占用概率
+ *      - p_hit: 激光终点处增加占用概率
+ *      - p_miss: 激光路径上减少占用概率 (自由空间)
+ *   2. getInflateOccupancy: 按 obstacles_inflation 膨胀障碍物
+ *   3. getOccupancy: 查询指定坐标的占用概率，> p_occ 视为占
+ */
+
 void GridMap::initMap(rclcpp::Node::SharedPtr node)
 {
   node_ = node;

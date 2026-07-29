@@ -17,8 +17,8 @@
 
     # ========== Grid Map（栅格地图）参数 ==========
     "grid_map/resolution": 0.1             # 地图分辨率 (m)
-    "grid_map/map_size_x": 30.0            # 地图大小 x (m)
-    "grid_map/map_size_y": 30.0            # 地图大小 y (m)
+    "grid_map/map_size_x": 15.0            # 地图大小 x (m)
+    "grid_map/map_size_y": 15.0            # 地图大小 y (m)
     "grid_map/map_size_z": 5.0             # 地图大小 z (m)
     "grid_map/local_update_range_x": 6.0   # 局部更新范围 x (m)
     "grid_map/local_update_range_y": 6.0   # 局部更新范围 y (m)
@@ -26,7 +26,7 @@
     # 0.275m 无人机半径 + 0.125m 初始水平安全边距 = 0.40m 膨胀
     "grid_map/obstacles_inflation": 0.40   # 障碍物膨胀半径 (m)
     "grid_map/local_map_margin": 10        # 局部地图边界余量
-    "grid_map/ground_height": -0.01        # 地面高度 (m)
+    "grid_map/ground_height": -0.1        # 地面高度 (m)
     "grid_map/use_depth_filter": false     # 是否使用深度滤波
     "grid_map/depth_filter_tolerance": 0.15
     "grid_map/depth_filter_maxdist": 8.0

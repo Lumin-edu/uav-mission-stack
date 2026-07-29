@@ -1,3 +1,19 @@
+/**
+ * BsplineOptimizer — B-spline 轨迹优化器
+ *
+ * 这是 EGO 规划器的核心优化模块，将初始多项式轨迹优化为无碰撞的 B-spline 轨迹。
+ *
+ * 优化管线 (reboundReplan 中的三步):
+ *   Step 1 (INIT): 从多项式轨迹采样初始 B-spline 控制点
+ *   Step 2 (OPTIMIZE): 基于梯度的优化
+ *     - 平滑代价 (smoothness): 最小化加速度/加加速度
+ *     - 碰撞代价 (collision): 将控制点推离障碍物
+ *     - 可行性代价 (feasibility): 限制速度/加速度
+ *   Step 3 (REFINE): 时间重分配确保动力学可行性
+ *
+ * 优化使用 L-BFGS 梯度下降，通过 ESDF (欧几里得符号距离场) 快速计算碰撞梯度。
+ */
+
 #include "bspline_opt/bspline_optimizer.h"
 #include "bspline_opt/gradient_descent_optimizer.h"
 // using namespace std;

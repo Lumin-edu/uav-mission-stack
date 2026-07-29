@@ -6,6 +6,23 @@ namespace ego_planner
 
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
   {
+    /**
+     * EGO 状态机初始化：加载参数、创建订阅者、启动定时器。
+     *
+     * 状态机包含 7 种状态：
+     *   INIT → WAIT_TARGET → GEN_NEW_TRAJ → EXEC_TRAJ → WAIT_TARGET (循环)
+     *                        → REPLAN_TRAJ → EXEC_TRAJ (重规划)
+     *                        → EMERGENCY_STOP (碰撞急停)
+     *
+     * 关键订阅：
+     *   - odom_world: Point-LIO 里程计 (remap 到 /odom)
+     *   - /move_base_simple/goal: 目标航点 (flight_type=1)
+     *   - planning/bspline: 集群中其他飞机的 B-spline 轨迹
+     *
+     * 关键定时器：
+     *   - exec_timer: 10ms FSM 主循环
+     *   - safety_timer: 50ms 碰撞检测
+     */
     node_ = node;
     
     current_wp_ = 0;
@@ -188,6 +205,14 @@ namespace ego_planner
 
   void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
+    /**
+     * 全局轨迹规划：从当前位置到目标航点。
+     *
+     * 调用 planner_manager_->planGlobalTraj() 生成多项式全局参考轨迹，
+     * 然后触发 FSM 状态转换：
+     *   - 若处于 WAIT_TARGET → 进入 GEN_NEW_TRAJ (首次规划)
+     *   - 否则 → 进入 REPLAN_TRAJ (重规划)
+     */
     bool success = false;
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
@@ -237,6 +262,13 @@ namespace ego_planner
 
   void EGOReplanFSM::waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
   {
+    /**
+     * 目标航点回调 (flight_type=MANUAL_TARGET=1)。
+     *
+     * 接收 /move_base_simple/goal (由 startup_goal 发布或 RViz 2D Goal Pose 点击)，
+     * 解析 x/y 作为目标位置，z 若 < 0.05 则使用 manual_goal_z_ 默认高度。
+     * 调用 planNextWaypoint 启动全局轨迹规划。
+     */
     if (msg->pose.position.z < -0.1)
       return;
 
@@ -252,6 +284,11 @@ namespace ego_planner
 
   void EGOReplanFSM::odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg)
   {
+    /**
+     * Point-LIO 里程计回调：更新当前位置、速度、姿态。
+     * 坐标由 /odom (ROS 标准系: x前,y左,z上) 提供，
+     * EGO 直接在 odom 坐标系下工作，不做额外变换。
+     */
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
     odom_pos_(2) = msg->pose.pose.position.z;
@@ -467,6 +504,29 @@ namespace ego_planner
 
   void EGOReplanFSM::execFSMCallback()
   {
+    /**
+     * FSM 主循环 (100Hz, exec_timer_ 10ms)。
+     *
+     * 状态机流转：
+     *
+     *   INIT: 等待里程计 → WAIT_TARGET
+     *
+     *   WAIT_TARGET: 等待目标航点 (/move_base_simple/goal)
+     *     → 收到目标 → GEN_NEW_TRAJ 或 SEQUENTIAL_START (集群模式)
+     *
+     *   GEN_NEW_TRAJ: 首次轨迹生成 (planFromGlobalTraj)
+     *     → 成功 → EXEC_TRAJ
+     *
+     *   EXEC_TRAJ: 轨迹执行中
+     *     → 接近终点 + 无新目标 → WAIT_TARGET (任务完成)
+     *     → 偏离轨迹或超时 → REPLAN_TRAJ (重规划)
+     *
+     *   REPLAN_TRAJ: 从当前轨迹位置重规划 (planFromCurrentTraj)
+     *     → 成功 → EXEC_TRAJ
+     *
+     *   EMERGENCY_STOP: 碰撞急停
+     *     → 速度降到 0.1m/s 以下 → GEN_NEW_TRAJ
+     */
     exec_timer_->cancel(); // To avoid blockage
 
     static int fsm_num = 0;

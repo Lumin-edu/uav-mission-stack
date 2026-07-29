@@ -6,12 +6,42 @@ Offboard control.
 ```text
 /livox/lidar + /livox/imu
   -> Point-LIO /odom + /cloud_registered
+  -> planner fusion: Point-LIO x/y + PX4 range-aided z
+  -> /ego/odom_fused + /ego/cloud_registered_fused
   -> EGO /ego/position_cmd (100 Hz B-spline samples)
   -> PX4 TrajectorySetpoint
 ```
 
 The package starts no Gazebo nodes, synthetic sensors, scenario maps, fake
 odometry, or `/sim/*` topics.
+
+The verified `hx_bringup_pointlio_hover/pointlio_to_px4_visual_odom.py`
+continues to consume raw `/odom`. The planner-only fusion path must never feed
+back into PX4 visual odometry. EGO, its obstacle map, the startup goal gate, and
+the EGO-to-PX4 controller consume `/ego/odom_fused` and
+`/ego/cloud_registered_fused` instead.
+
+On flat ground, planner height is computed from PX4 NED height while retaining
+the initial Point-LIO ROS-up origin:
+
+```text
+ego_z = initial_pointlio_z - (px4_z - initial_px4_z)
+ego_vz = -px4_vz
+cloud_z += ego_z - current_pointlio_z
+```
+
+The fusion health gate requires a valid range sensor by default. Before flight,
+verify PX4 1.14 is configured for horizontal-only external vision and range
+height:
+
+```text
+EKF2_EV_CTRL = 1
+EKF2_HGT_REF = 2
+EKF2_RNG_CTRL = 2
+```
+
+This range-height mode is restricted to a flat surface. Do not use it above
+tables, steps, ramps, or changing terrain.
 
 ## Control contract
 
@@ -86,6 +116,9 @@ ros2 topic hz /livox/lidar
 ros2 topic hz /livox/imu
 ros2 topic hz /odom
 ros2 topic hz /cloud_registered
+ros2 topic hz /ego/odom_fused
+ros2 topic hz /ego/cloud_registered_fused
+ros2 topic echo /ego/height_fusion_healthy --once
 ros2 topic hz /fmu/in/vehicle_visual_odometry
 ros2 topic hz /ego/position_cmd
 ros2 topic echo /ego_hw/diagnostics --once
@@ -112,6 +145,7 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
   use_px4_monitor:=true \
   use_px4_control_watchdog:=true \
   use_position_compare:=true \
+  require_rangefinder_height:=true \
   takeoff_before_ego:=true \
   takeoff_altitude:=0.40 \
   goal_x:=0.0 goal_y:=2.0 goal_z:=0.40 \
