@@ -55,6 +55,9 @@ double imu_sync_warn_threshold()
 void warn_lidar_duration_if_needed(const double lidar_beg_time, const double lidar_last_time)
 {
   const double duration = lidar_last_time - lidar_beg_time;
+  if (allow_zero_lidar_duration && std::fabs(duration) <= 1e-9) {
+    return;
+  }
   const double threshold = lidar_duration_warn_threshold();
   if (duration <= 0.0 || std::fabs(duration - lidar_time_inte) > threshold) {
     RCLCPP_WARN(

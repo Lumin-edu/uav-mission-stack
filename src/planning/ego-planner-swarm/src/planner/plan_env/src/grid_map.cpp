@@ -1,5 +1,7 @@
 #include "plan_env/grid_map.h"
 
+#include <cmath>
+
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
 // #define last_img_ md_.depth_image_[!(image_cnt_ & 1)]
 
@@ -28,6 +30,8 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/local_update_range_y", -1.0);
   node_->declare_parameter("grid_map/local_update_range_z", -1.0);
   node_->declare_parameter("grid_map/obstacles_inflation", -1.0);
+  node_->declare_parameter("grid_map/use_static_map", false);
+  node_->declare_parameter("grid_map/static_map_inflation", -1.0);
   node_->declare_parameter("grid_map/fx", -1.0);
   node_->declare_parameter("grid_map/fy", -1.0);
   node_->declare_parameter("grid_map/cx", -1.0);
@@ -65,6 +69,8 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/local_update_range_y", mp_.local_update_range_(1));
   node_->get_parameter("grid_map/local_update_range_z", mp_.local_update_range_(2));
   node_->get_parameter("grid_map/obstacles_inflation", mp_.obstacles_inflation_);
+  node_->get_parameter("grid_map/use_static_map", mp_.use_static_map_);
+  node_->get_parameter("grid_map/static_map_inflation", mp_.static_map_inflation_);
   node_->get_parameter("grid_map/fx", mp_.fx_);
   node_->get_parameter("grid_map/fy", mp_.fy_);
   node_->get_parameter("grid_map/cx", mp_.cx_);
@@ -93,6 +99,9 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/local_map_margin", mp_.local_map_margin_);
   node_->get_parameter("grid_map/ground_height", mp_.ground_height_);
   node_->get_parameter("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_);
+
+  if (mp_.static_map_inflation_ < 0.0)
+    mp_.static_map_inflation_ = max(0.0, mp_.obstacles_inflation_);
 
   if (mp_.virtual_ceil_height_ - mp_.ground_height_ > z_size)
   {
@@ -128,6 +137,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_ - mp_.unknown_flag_);
   md_.occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
+  md_.static_occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
 
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
@@ -179,6 +189,14 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   indep_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
       "grid_map/cloud", 10, std::bind(&GridMap::cloudCallback, this, std::placeholders::_1));
 
+  if (mp_.use_static_map_)
+  {
+    auto static_map_qos = rclcpp::QoS(rclcpp::KeepLast(1)).transient_local();
+    static_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+        "grid_map/static_cloud", static_map_qos,
+        std::bind(&GridMap::staticCloudCallback, this, std::placeholders::_1));
+  }
+
   indep_odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       "grid_map/odom", 10, std::bind(&GridMap::odomCallback, this, std::placeholders::_1));
 
@@ -194,12 +212,23 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   // 发布者
   map_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map/occupancy", 10);
   map_inf_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>("grid_map/occupancy_inflate", 10);
+  static_map_inf_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "grid_map/static_occupancy_inflate",
+      rclcpp::QoS(rclcpp::KeepLast(1)).transient_local());
+
+  if (mp_.use_static_map_)
+  {
+    RCLCPP_INFO(node_->get_logger(),
+                "Static accumulated-map occupancy enabled (inflation %.2f m).",
+                mp_.static_map_inflation_);
+  }
 
   md_.occ_need_update_ = false;
   md_.local_updated_ = false;
   md_.has_first_depth_ = false;
   md_.has_odom_ = false;
   md_.has_cloud_ = false;
+  md_.has_static_map_ = false;
   md_.image_cnt_ = 0;
   md_.last_occ_update_time_ = rclcpp::Time(0, 0, RCL_SYSTEM_TIME);
 
@@ -925,6 +954,58 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   }
 }
 
+void GridMap::staticCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &cloud_msg)
+{
+  pcl::PointCloud<pcl::PointXYZ> map_cloud;
+  pcl::fromROSMsg(*cloud_msg, map_cloud);
+  if (map_cloud.empty())
+  {
+    RCLCPP_WARN(node_->get_logger(), "Ignoring an empty static accumulated map.");
+    return;
+  }
+
+  std::fill(md_.static_occupancy_buffer_inflate_.begin(),
+            md_.static_occupancy_buffer_inflate_.end(), 0);
+
+  const int inf_step = static_cast<int>(ceil(mp_.static_map_inflation_ / mp_.resolution_));
+  const double boundary_margin = inf_step * mp_.resolution_;
+  vector<Eigen::Vector3i> inf_pts;
+  inf_pts.resize(static_cast<size_t>(pow(2 * inf_step + 1, 3)));
+  size_t accepted_points = 0;
+
+  for (const auto &pt : map_cloud.points)
+  {
+    if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z))
+      continue;
+
+    const Eigen::Vector3d pos(pt.x, pt.y, pt.z);
+    if ((pos.array() < (mp_.map_min_boundary_.array() - boundary_margin)).any() ||
+        (pos.array() > (mp_.map_max_boundary_.array() + boundary_margin)).any())
+      continue;
+
+    Eigen::Vector3i point_id;
+    posToIndex(pos, point_id);
+    inflatePoint(point_id, inf_step, inf_pts);
+    bool point_overlaps_map = false;
+    for (const auto &inflated_id : inf_pts)
+    {
+      if (isInMap(inflated_id))
+      {
+        md_.static_occupancy_buffer_inflate_[toAddress(inflated_id)] = 1;
+        point_overlaps_map = true;
+      }
+    }
+    if (point_overlaps_map)
+      ++accepted_points;
+  }
+
+  RCLCPP_INFO(node_->get_logger(),
+              "Static accumulated map rebuilt: %zu/%zu source points inside EGO map.",
+              accepted_points, map_cloud.size());
+  md_.has_static_map_ = true;
+  publishStaticMapInflate();
+}
+
 void GridMap::publishMap()
 {
 
@@ -998,7 +1079,9 @@ void GridMap::publishMapInflate(bool all_info)
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
-        if (md_.occupancy_buffer_inflate_[toAddress(x, y, z)] == 0)
+        const int adr = toAddress(x, y, z);
+        if (md_.occupancy_buffer_inflate_[adr] == 0 &&
+            md_.static_occupancy_buffer_inflate_[adr] == 0)
           continue;
 
         Eigen::Vector3d pos;
@@ -1024,9 +1107,49 @@ void GridMap::publishMapInflate(bool all_info)
   // RCLCPP_INFO(rclcpp::get_logger("publishMapInflate"), "pub map");
 }
 
+void GridMap::publishStaticMapInflate()
+{
+  if (!mp_.use_static_map_)
+    return;
+
+  pcl::PointXYZ pt;
+  pcl::PointCloud<pcl::PointXYZ> cloud;
+  for (int x = 0; x < mp_.map_voxel_num_(0); ++x)
+    for (int y = 0; y < mp_.map_voxel_num_(1); ++y)
+      for (int z = 0; z < mp_.map_voxel_num_(2); ++z)
+      {
+        if (md_.static_occupancy_buffer_inflate_[toAddress(x, y, z)] == 0)
+          continue;
+
+        Eigen::Vector3d pos;
+        indexToPos(Eigen::Vector3i(x, y, z), pos);
+        if (pos(2) > mp_.visualization_truncate_height_)
+          continue;
+
+        pt.x = pos(0);
+        pt.y = pos(1);
+        pt.z = pos(2);
+        cloud.push_back(pt);
+      }
+
+  cloud.width = cloud.points.size();
+  cloud.height = 1;
+  cloud.is_dense = true;
+  cloud.header.frame_id = mp_.frame_id_;
+  sensor_msgs::msg::PointCloud2 cloud_msg;
+  pcl::toROSMsg(cloud, cloud_msg);
+  cloud_msg.header.stamp = node_->now();
+  static_map_inf_pub_->publish(cloud_msg);
+}
+
 bool GridMap::odomValid() { return md_.has_odom_; }
 
 bool GridMap::hasDepthObservation() { return md_.has_first_depth_; }
+
+bool GridMap::hasOccupancyObservation()
+{
+  return mp_.use_static_map_ ? md_.has_static_map_ : md_.has_cloud_;
+}
 
 Eigen::Vector3d GridMap::getOrigin() { return mp_.map_origin_; }
 

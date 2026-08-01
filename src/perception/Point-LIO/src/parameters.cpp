@@ -36,6 +36,9 @@ float DET_RANGE = 450;
 bool imu_en = true;
 double imu_time_inte = 0.005;
 double laser_point_cov = 0.01, acc_norm;
+bool lidar_innovation_gate_en = false;
+double max_lidar_position_correction = 0.5;
+double max_lidar_rotation_correction_deg = 20.0;
 double vel_cov, acc_cov_input, gyr_cov_input;
 double gyr_cov_output, acc_cov_output, b_gyr_cov, b_acc_cov;
 double imu_meas_acc_cov, imu_meas_omg_cov;
@@ -60,6 +63,7 @@ shared_ptr<Preprocess> p_pre;
 shared_ptr<ImuProcess> p_imu;
 double time_update_last = 0.0, time_current = 0.0, time_predict_last_const = 0.0, t_last = 0.0;
 double time_diff_lidar_to_imu = 0.0;
+bool allow_zero_lidar_duration = false;
 
 double lidar_time_inte = 0.1, first_imu_time = 0.0;
 int cut_frame_num = 1, orig_odom_freq = 10;
@@ -150,6 +154,9 @@ void readParameters(std::shared_ptr<rclcpp::Node> & nh)
     nh->declare_parameter<double>("common.time_diff_lidar_to_imu", 0.0);
     nh->get_parameter("common.time_diff_lidar_to_imu", time_diff_lidar_to_imu);
 
+    nh->declare_parameter<bool>("common.allow_zero_lidar_duration", false);
+    nh->get_parameter("common.allow_zero_lidar_duration", allow_zero_lidar_duration);
+
     nh->declare_parameter<double>("filter_size_surf", 0.2);
     nh->get_parameter("filter_size_surf", filter_size_surf_min);
 
@@ -179,6 +186,24 @@ void readParameters(std::shared_ptr<rclcpp::Node> & nh)
 
     nh->declare_parameter<double>("mapping.lidar_meas_cov", 0.1);
     nh->get_parameter("mapping.lidar_meas_cov", laser_point_cov);
+
+    nh->declare_parameter<bool>("mapping.lidar_innovation_gate_en", false);
+    nh->get_parameter("mapping.lidar_innovation_gate_en", lidar_innovation_gate_en);
+
+    nh->declare_parameter<double>("mapping.max_lidar_position_correction", 0.5);
+    nh->get_parameter(
+      "mapping.max_lidar_position_correction", max_lidar_position_correction);
+
+    nh->declare_parameter<double>("mapping.max_lidar_rotation_correction_deg", 20.0);
+    nh->get_parameter(
+      "mapping.max_lidar_rotation_correction_deg", max_lidar_rotation_correction_deg);
+
+    if (
+      lidar_innovation_gate_en &&
+      (max_lidar_position_correction <= 0.0 || max_lidar_rotation_correction_deg <= 0.0)) {
+      throw std::invalid_argument(
+              "LiDAR innovation gate limits must be positive when the gate is enabled");
+    }
 
     nh->declare_parameter<double>("mapping.acc_cov_input", 0.1);
     nh->get_parameter("mapping.acc_cov_input", acc_cov_input);

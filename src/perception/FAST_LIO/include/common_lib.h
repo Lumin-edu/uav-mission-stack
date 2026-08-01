@@ -50,7 +50,8 @@ M3F Eye3f(M3F::Identity());
 V3D Zero3d(0, 0, 0);
 V3F Zero3f(0, 0, 0);
 
-struct MeasureGroup     // Lidar data and imu dates for the curent process
+// 一次滤波更新所需的完整测量包：一帧 LiDAR，以及覆盖该帧扫描结束时刻的 IMU 序列。
+struct MeasureGroup
 {
     MeasureGroup()
     {
@@ -180,13 +181,11 @@ auto set_pose6d(const double t, const Matrix<T, 3, 1> &a, const Matrix<T, 3, 1> 
     return move(rot_kp);
 }
 
-/* comment
-plane equation: Ax + By + Cz + D = 0
-convert to: A/D*x + B/D*y + C/D*z = -1
-solve: A0*x0 = b0
-where A0_i = [x_i, y_i, z_i], x0 = [A/D, B/D, C/D]^T, b0 = [-1, ..., -1]^T
-normvec:  normalized x0
-*/
+/*
+ * 用邻域点最小二乘拟合平面：Ax + By + Cz + D = 0。
+ * 固定 D=1 后求 [A, B, C]^T，再归一化得到单位法向量；只有所有邻域点到
+ * 拟合平面的距离都小于 threshold 才接受。h_share_model() 用它构造点到平面残差。
+ */
 template<typename T>
 bool esti_normvector(Matrix<T, 3, 1> &normvec, const PointVector &point, const T &threshold, const int &point_num)
 {
@@ -236,6 +235,7 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
         A(j,2) = point[j].z;
     }
 
+    // A * [a,b,c]^T = -1；QR 比直接求逆更稳定。
     Matrix<T, 3, 1> normvec = A.colPivHouseholderQr().solve(b);
 
     T n = normvec.norm();
@@ -244,6 +244,7 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
     pca_result(2) = normvec(2) / n;
     pca_result(3) = 1.0 / n;
 
+    // 5 个近邻中只要有一点偏离过大，就认为该局部邻域不能可靠表示平面。
     for (int j = 0; j < NUM_MATCH_POINTS; j++)
     {
         if (fabs(pca_result(0) * point[j].x + pca_result(1) * point[j].y + pca_result(2) * point[j].z + pca_result(3)) > threshold)

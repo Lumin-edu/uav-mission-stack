@@ -56,6 +56,8 @@ struct MappingParameters
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
   double obstacles_inflation_;
+  double static_map_inflation_;
+  bool use_static_map_;
   string frame_id_;
   int pose_type_;
 
@@ -97,6 +99,7 @@ struct MappingData
 
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
+  std::vector<char> static_occupancy_buffer_inflate_;
 
   // camera position and pose data
 
@@ -113,7 +116,7 @@ struct MappingData
 
   bool occ_need_update_, local_updated_;
   bool has_first_depth_;
-  bool has_odom_, has_cloud_;
+  bool has_odom_, has_cloud_, has_static_map_;
 
   // odom_depth_timeout_
   rclcpp::Time last_occ_update_time_;
@@ -188,6 +191,7 @@ public:
   void publishDepth();
 
   bool hasDepthObservation();
+  bool hasOccupancyObservation();
   bool odomValid();
   void getRegion(Eigen::Vector3d &ori, Eigen::Vector3d &size);
   inline double getResolution();
@@ -209,6 +213,7 @@ private:
   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+  void staticCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &cloud_msg);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
 
   // update occupancy by raycasting
@@ -219,6 +224,7 @@ private:
   void projectDepthImage();
   void raycastProcess();
   void clearAndInflateLocalMap();
+  void publishStaticMapInflate();
 
   inline void inflatePoint(const Eigen::Vector3i &pt, int step, vector<Eigen::Vector3i> &pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);
@@ -243,11 +249,13 @@ private:
   SynchronizerImageOdom sync_image_odom_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr indep_cloud_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr static_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr extrinsic_sub_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr static_map_inf_pub_;
 
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr vis_timer_;
@@ -284,7 +292,9 @@ inline bool GridMap::isUnknown(const Eigen::Vector3i &id)
 {
   Eigen::Vector3i id1 = id;
   boundIndex(id1);
-  return md_.occupancy_buffer_[toAddress(id1)] < mp_.clamp_min_log_ - 1e-3;
+  const int adr = toAddress(id1);
+  return md_.static_occupancy_buffer_inflate_[adr] == 0 &&
+         md_.occupancy_buffer_[adr] < mp_.clamp_min_log_ - 1e-3;
 }
 
 inline bool GridMap::isUnknown(const Eigen::Vector3d &pos)
@@ -302,7 +312,9 @@ inline bool GridMap::isKnownFree(const Eigen::Vector3i &id)
 
   // return md_.occupancy_buffer_[adr] >= mp_.clamp_min_log_ &&
   //     md_.occupancy_buffer_[adr] < mp_.min_occupancy_log_;
-  return md_.occupancy_buffer_[adr] >= mp_.clamp_min_log_ && md_.occupancy_buffer_inflate_[adr] == 0;
+  return md_.occupancy_buffer_[adr] >= mp_.clamp_min_log_ &&
+         md_.occupancy_buffer_inflate_[adr] == 0 &&
+         md_.static_occupancy_buffer_inflate_[adr] == 0;
 }
 
 inline bool GridMap::isKnownOccupied(const Eigen::Vector3i &id)
@@ -311,7 +323,8 @@ inline bool GridMap::isKnownOccupied(const Eigen::Vector3i &id)
   boundIndex(id1);
   int adr = toAddress(id1);
 
-  return md_.occupancy_buffer_inflate_[adr] == 1;
+  return md_.occupancy_buffer_inflate_[adr] == 1 ||
+         md_.static_occupancy_buffer_inflate_[adr] == 1;
 }
 
 inline void GridMap::setOccupied(Eigen::Vector3d pos)
@@ -362,7 +375,9 @@ inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
-  return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
+  const int adr = toAddress(id);
+  return int(md_.occupancy_buffer_inflate_[adr] ||
+             md_.static_occupancy_buffer_inflate_[adr]);
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3i id)

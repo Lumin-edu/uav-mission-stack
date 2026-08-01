@@ -12,6 +12,7 @@ std::vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
 bool point_selected_surf[100000] = {0};
 std::vector<M3D> crossmat_list;
 int effct_feat_num = 0;
+int last_effective_feat_num = 0;
 int k = 0;
 int idx = -1;
 esekfom::esekf<state_input, 24, input_ikfom> kf_input;
@@ -171,6 +172,7 @@ void h_model_input(
       }
     }
   }
+  last_effective_feat_num = effect_num_k;
   if (effect_num_k == 0) {
     ekfom_data.valid = false;
     return;
@@ -279,6 +281,7 @@ void h_model_output(
       }
     }
   }
+  last_effective_feat_num = effect_num_k;
   if (effect_num_k == 0) {
     ekfom_data.valid = false;
     return;

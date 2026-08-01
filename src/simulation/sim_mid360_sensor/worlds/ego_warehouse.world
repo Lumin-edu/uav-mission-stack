@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <world name="ego_warehouse">
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+    <physics type="ode"><max_step_size>0.004</max_step_size><real_time_update_rate>250</real_time_update_rate></physics>
+    <scene><ambient>0.35 0.35 0.35 1</ambient><background>0.55 0.63 0.72 1</background></scene>
+    <model name="wall_north"><static>true</static><pose>10 0 2.5 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>0.3 20 5</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.3 20 5</size></box></geometry></visual></link></model>
+    <model name="wall_south"><static>true</static><pose>-10 0 2.5 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>0.3 20 5</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.3 20 5</size></box></geometry></visual></link></model>
+    <model name="wall_east"><static>true</static><pose>0 10 2.5 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>20 0.3 5</size></box></geometry></collision><visual name="visual"><geometry><box><size>20 0.3 5</size></box></geometry></visual></link></model>
+    <model name="wall_west"><static>true</static><pose>0 -10 2.5 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>20 0.3 5</size></box></geometry></collision><visual name="visual"><geometry><box><size>20 0.3 5</size></box></geometry></visual></link></model>
+    <!-- The upright MID-360 sees only 7 degrees below the horizon but 52
+         degrees above it. A real indoor warehouse has overhead structure;
+         this ceiling provides the corresponding vertical LiDAR constraint. -->
+    <model name="ceiling"><static>true</static><pose>0 0 5.1 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>20 20 0.2</size></box></geometry></collision><visual name="visual"><geometry><box><size>20 20 0.2</size></box></geometry><material><ambient>0.55 0.55 0.58 1</ambient><diffuse>0.65 0.65 0.68 1</diffuse></material></visual></link></model>
+    <model name="pillar_a"><static>true</static><pose>3 -2 2 0 0 0</pose><link name="link"><collision name="collision"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></collision><visual name="visual"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></visual></link></model>
+    <model name="pillar_b"><static>true</static><pose>5 1.5 2 0 0 0</pose><link name="link"><collision name="collision"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></collision><visual name="visual"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></visual></link></model>
+    <model name="pillar_c"><static>true</static><pose>1.5 3.7 2 0 0 0</pose><link name="link"><collision name="collision"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></collision><visual name="visual"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></visual></link></model>
+    <model name="pillar_d"><static>true</static><pose>-2 1.5 2 0 0 0</pose><link name="link"><collision name="collision"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></collision><visual name="visual"><geometry><cylinder><radius>0.45</radius><length>4</length></cylinder></geometry></visual></link></model>
+    <model name="block_a"><static>true</static><pose>4 -5 1.25 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></visual></link></model>
+    <model name="block_b"><static>true</static><pose>-3 -3.5 1.25 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></visual></link></model>
+    <model name="block_c"><static>true</static><pose>-5 3 1.25 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.2 1.2 2.5</size></box></geometry></visual></link></model>
+  </world>
+</sdf>

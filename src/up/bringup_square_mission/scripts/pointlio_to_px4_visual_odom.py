@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+"""
+Point-LIO -> PX4 EKF2 视觉里程计桥接节点。
+
+将 Point-LIO 的 /Odometry 消息转换到 PX4 NED 坐标系，
+并通过 /fmu/in/vehicle_visual_odometry 发送给 PX4 EKF2 作为外部视觉里程计输入。
+核心功能：
+  1. 坐标系对齐（Point-LIO 世界系 -> PX4 NED 本地系）
+  2. 偏航角变换
+  3. 位置跳跃保护与合法性检查
+  4. 发布速率限制
+"""
 
 import math
 from typing import Optional
@@ -9,8 +20,21 @@ from px4_msgs.msg import TimesyncStatus, VehicleLocalPosition, VehicleOdometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
+from rigid_transform import compose_pose, normalize_quaternion
+
 
 class PointlioToPx4VisualOdom(Node):
+    """
+    Point-LIO 到 PX4 视觉里程计的转换节点。
+
+    坐标系说明：
+      - Point-LIO 坐标系：通常为 ROS 标准坐标系（x 前, y 左, z 上）
+      - PX4 NED 坐标系：N（北/前）, E（东/右）, D（下/-z）
+      - 转换公式：
+          PX4_N = Point-LIO_x
+          PX4_E = pointlio_y_to_px4_y_sign * Point-LIO_y   (默认 -1，即 y 左 -> E 右)
+          PX4_D = -Point-LIO_z
+    """
     def __init__(self) -> None:
         super().__init__("pointlio_to_px4_visual_odom")
 
@@ -27,6 +51,23 @@ class PointlioToPx4VisualOdom(Node):
         self.output_topic = self.declare_parameter(
             "output_topic", "/fmu/in/vehicle_visual_odometry"
         ).value
+        self.pointlio_pose_frame = str(
+            self.declare_parameter("pointlio_pose_frame", "base_link").value
+        )
+        self.vehicle_frame = str(self.declare_parameter("vehicle_frame", "base").value)
+
+        # Point-LIO 的 base_link 数值对应 MID360 IMU 原点；base 表示机体中心。
+        # T_base_link_base 的平移是 base 原点在 base_link 坐标系中的坐标：
+        # [-0.011, -0.02329, 0.04412] + [0, 0, -0.10]
+        # = [-0.011, -0.02329, -0.05588] m。
+        self.base_link_to_base_translation = self._vector_parameter(
+            "base_link_to_base_translation", [-0.011, -0.02329, -0.05588], 3
+        )
+        self.base_link_to_base_rotation_xyzw = normalize_quaternion(
+            self._vector_parameter(
+                "base_link_to_base_rotation_xyzw", [0.0, 0.0, 0.0, 1.0], 4
+            )
+        )
         self.publish_rate_limit = float(self.declare_parameter("publish_rate_limit", 50.0).value)
         self.align_when_px4_valid = bool(self.declare_parameter("align_when_px4_valid", True).value)
         self.use_px4_reference = bool(self.declare_parameter("use_px4_reference", False).value)
@@ -95,8 +136,20 @@ class PointlioToPx4VisualOdom(Node):
             f"use_px4_reference={self.use_px4_reference}, "
             f"use_timesync_timestamp={self.use_timesync_timestamp}, "
             f"pointlio_y_to_px4_y_sign={self.pointlio_y_to_px4_y_sign:.1f}, "
-            f"yaw_sign={self.yaw_sign:.1f}, yaw_offset={self.yaw_offset:.2f}"
+            f"yaw_sign={self.yaw_sign:.1f}, yaw_offset={self.yaw_offset:.2f}, "
+            f"pose_interpretation=T_odom_{self.pointlio_pose_frame}, "
+            f"output_body={self.vehicle_frame}, "
+            f"t_base_link_base="
+            f"{tuple(round(value, 5) for value in self.base_link_to_base_translation)}, "
+            f"q_base_link_base_xyzw="
+            f"{tuple(round(value, 5) for value in self.base_link_to_base_rotation_xyzw)}"
         )
+
+    def _vector_parameter(self, name: str, default: list[float], size: int) -> tuple[float, ...]:
+        values = tuple(float(value) for value in self.declare_parameter(name, default).value)
+        if len(values) != size or not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{name} must contain {size} finite values")
+        return values
 
     def now_us(self) -> int:
         return int(self.get_clock().now().nanoseconds / 1000)
@@ -149,7 +202,18 @@ class PointlioToPx4VisualOdom(Node):
             return False
         return abs(float(self.latest_px4.z)) <= self.max_px4_reference_abs_z
 
-    def align_if_ready(self, msg: Odometry) -> bool:
+    def align_if_ready(
+        self,
+        vehicle_position: tuple[float, float, float],
+        vehicle_orientation: tuple[float, float, float, float],
+    ) -> bool:
+        """
+        首次接收数据时进行坐标系对齐。
+
+        记录 Point-LIO 起始位置和偏航角作为参考原点（ref_pointlio），
+        若 use_px4_reference=True，则同时记录 PX4 位置作为绝对参考。
+        计算 Point-LIO 世界系到 PX4 NED 系的偏航偏移量。
+        """
         if self.aligned:
             return True
         if self.use_px4_reference and not self.px4_reference_usable():
@@ -161,11 +225,11 @@ class PointlioToPx4VisualOdom(Node):
             )
             return False
 
-        p = msg.pose.pose.position
-        q = msg.pose.pose.orientation
-        self.ref_pointlio = [float(p.x), float(p.y), float(p.z)]
-        self.ref_pointlio_yaw = self.quaternion_to_yaw(q.x, q.y, q.z, q.w)
+        # 记录补偿后 base 的起始位置和偏航角作为参考原点。
+        self.ref_pointlio = [float(value) for value in vehicle_position]
+        self.ref_pointlio_yaw = self.quaternion_to_yaw(*vehicle_orientation)
         if self.use_px4_reference:
+            # 使用 PX4 本地位置作为绝对参考
             self.ref_px4 = [
                 float(self.latest_px4.x),
                 float(self.latest_px4.y),
@@ -173,12 +237,14 @@ class PointlioToPx4VisualOdom(Node):
             ]
             px4_heading = float(self.latest_px4.heading)
             self.ref_px4_heading = self.wrap_angle(px4_heading) if math.isfinite(px4_heading) else 0.0
+            # 计算偏航偏移：PX4偏航 - (yaw_sign * PointLIO偏航) - 额外偏移
             self.yaw_offset_world_to_px4 = self.wrap_angle(
                 self.ref_px4_heading
                 - self.yaw_sign * self.ref_pointlio_yaw
                 - self.yaw_offset
             )
         else:
+            # 不以 PX4 为参考时，使用纯相对增量模式
             self.ref_px4 = [0.0, 0.0, 0.0]
             self.ref_px4_heading = 0.0
             self.yaw_offset_world_to_px4 = 0.0
@@ -190,6 +256,26 @@ class PointlioToPx4VisualOdom(Node):
             f"yaw_offset={self.yaw_offset_world_to_px4:.2f}"
         )
         return True
+
+    def pointlio_base_link_pose_to_base(
+        self, msg: Odometry
+    ) -> Optional[tuple[tuple[float, float, float], tuple[float, float, float, float]]]:
+        """把 Point-LIO 的 base_link 位姿补偿成机体中心 base 位姿。"""
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        try:
+            # T_odom_base = T_odom_base_link * T_base_link_base
+            # p_odom_base = p_odom_base_link
+            #               + R_odom_base_link * t_base_link_base
+            return compose_pose(
+                (float(p.x), float(p.y), float(p.z)),
+                (float(q.x), float(q.y), float(q.z), float(q.w)),
+                self.base_link_to_base_translation,
+                self.base_link_to_base_rotation_xyzw,
+            )
+        except ValueError as error:
+            self.warn_throttled(f"Skipping visual odom publish: invalid Point-LIO pose: {error}")
+            return None
 
     def position_is_safe(self, pos: tuple[float, float, float]) -> bool:
         if not all(math.isfinite(value) for value in pos):
@@ -216,9 +302,20 @@ class PointlioToPx4VisualOdom(Node):
         return True
 
     def pointlio_position_to_px4_ned(self, x: float, y: float, z: float) -> tuple[float, float, float]:
+        """
+        将 Point-LIO 位置转换到 PX4 NED 坐标系。
+
+        步骤：
+          1. 计算相对于参考原点的增量
+          2. 翻转 y 轴方向（pointlio_y_to_px4_y_sign）
+          3. 绕偏航偏移角旋转
+          4. 加上 PX4 参考位置，z 取反（NED 下为正）
+        """
+        # 相对增量
         dx = x - self.ref_pointlio[0]
         dy = self.pointlio_y_to_px4_y_sign * (y - self.ref_pointlio[1])
         dz = z - self.ref_pointlio[2]
+        # 绕偏航偏移旋转
         cy = math.cos(self.yaw_offset_world_to_px4)
         sy = math.sin(self.yaw_offset_world_to_px4)
         px4_dx = cy * dx - sy * dy
@@ -226,7 +323,7 @@ class PointlioToPx4VisualOdom(Node):
         return (
             self.ref_px4[0] + px4_dx,
             self.ref_px4[1] + px4_dy,
-            self.ref_px4[2] - dz,
+            self.ref_px4[2] - dz,  # NED: D轴向下为正
         )
 
     def pointlio_vector_to_px4_ned(self, x: float, y: float, z: float) -> tuple[float, float, float]:
@@ -256,12 +353,29 @@ class PointlioToPx4VisualOdom(Node):
         return False
 
     def pointlio_callback(self, msg: Odometry) -> None:
-        if not self.align_if_ready(msg) or not self.should_publish():
+        """
+        Point-LIO 里程计回调：执行坐标转换并发布到 PX4。
+
+        流程：
+          1. 首次调用时进行坐标系对齐
+          2. 检查发布速率限制
+          3. 转换位置到 PX4 NED
+          4. 安全校验（有限性、z 范围、位置跳跃）
+          5. 组装 VehicleOdometry 消息并发布
+        """
+        # 唯一的杆臂补偿点：base_link（IMU 原点）-> base（机体中心）。
+        vehicle_pose = self.pointlio_base_link_pose_to_base(msg)
+        if vehicle_pose is None:
+            return
+        vehicle_position, vehicle_orientation = vehicle_pose
+
+        # 首次调用时使用补偿后的 base 进行坐标系对齐。
+        if not self.align_if_ready(vehicle_position, vehicle_orientation) or not self.should_publish():
             return
 
-        p = msg.pose.pose.position
-        q = msg.pose.pose.orientation
-        pos = self.pointlio_position_to_px4_ned(float(p.x), float(p.y), float(p.z))
+        # 补偿到此结束；base -> PX4 NED 继续调用原有转换逻辑，不重复使用外参。
+        pos = self.pointlio_position_to_px4_ned(*vehicle_position)
+        # 安全校验
         if not self.position_is_safe(pos):
             return
 
@@ -270,10 +384,11 @@ class PointlioToPx4VisualOdom(Node):
         out.timestamp = stamp
         out.timestamp_sample = stamp
         out.pose_frame = VehicleOdometry.POSE_FRAME_NED
+        # PX4 收到的是补偿后的 base 机体中心位置。
         out.position = [float(pos[0]), float(pos[1]), float(pos[2])]
 
         if self.publish_orientation:
-            yaw = self.quaternion_to_yaw(q.x, q.y, q.z, q.w)
+            yaw = self.quaternion_to_yaw(*vehicle_orientation)
             out.q = self.yaw_to_px4_quaternion(yaw)
         else:
             out.q = [float("nan"), float("nan"), float("nan"), float("nan")]
@@ -301,7 +416,7 @@ class PointlioToPx4VisualOdom(Node):
             self.last_print_sec = now
             yaw_text = ""
             if self.publish_orientation:
-                pointlio_yaw = self.quaternion_to_yaw(q.x, q.y, q.z, q.w)
+                pointlio_yaw = self.quaternion_to_yaw(*vehicle_orientation)
                 px4_yaw = self.wrap_angle(
                     self.yaw_sign * pointlio_yaw
                     + self.yaw_offset_world_to_px4
@@ -315,6 +430,7 @@ class PointlioToPx4VisualOdom(Node):
                 "visual odom published | "
                 f"pos_ned=({pos[0]:+.2f}, {pos[1]:+.2f}, {pos[2]:+.2f}) "
                 f"frame_in='{msg.header.frame_id}' child='{msg.child_frame_id}'"
+                f" interpreted_child='{self.pointlio_pose_frame}' output_body='{self.vehicle_frame}'"
                 f"{yaw_text}"
             )
 

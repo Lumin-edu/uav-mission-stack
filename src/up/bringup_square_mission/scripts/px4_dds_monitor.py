@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+PX4 DDS 话题监控节点。
+
+监控 PX4 飞控的核心输出话题状态，帮助在飞行前确认 uXRCE-DDS 通信链路正常。
+监控的话题包括：
+  - vehicle_status：飞控状态（包含 nav_state 导航状态）
+  - vehicle_local_position：本地位置（包含 xy_valid/z_valid 有效性标志）
+  - distance_sensor：距离传感器数据
+"""
 
 import rclpy
 from px4_msgs.msg import DistanceSensor, VehicleLocalPosition, VehicleStatus
@@ -7,6 +16,12 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 
 class Px4DdsMonitor(Node):
+    """
+    PX4 DDS 监控节点。
+
+    订阅三个核心 PX4 输出话题，每 2 秒打印一次数据到达状态和关键字段值，
+    用于验证 uXRCE-DDS 通信链路和传感器数据是否正常到达。
+    """
     def __init__(self) -> None:
         super().__init__("px4_dds_monitor")
 

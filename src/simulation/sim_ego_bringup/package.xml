@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>sim_ego_bringup</name>
+  <version>0.1.0</version>
+  <description>Simulation and PX4 integration bringup for the ROS 2 EGO Planner mission workspace.</description>
+
+  <maintainer email="noreply@example.com">sim-ego</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>ego_planner</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>map_generator</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>poscmd_2_odom</exec_depend>
+  <exec_depend>point_lio</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>px4_msgs</exec_depend>
+  <exec_depend>quadrotor_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>traj_utils</exec_depend>
+  <exec_depend>sim_mid360_sensor</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -27,7 +27,12 @@
 
 const bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
 
-/// *************IMU Process and undistortion
+/*
+ * IMU 前端承担三件事：
+ * 1. 静止初始化重力方向和陀螺零偏；
+ * 2. 在相邻 IMU 时刻之间传播名义状态与协方差；
+ * 3. 根据传播得到的轨迹，把一帧内不同时刻采到的 LiDAR 点补偿到帧末坐标系。
+ */
 class ImuProcess
 {
  public:
@@ -155,8 +160,10 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a)
 
 void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N)
 {
-  /** 1. initializing the gravity, gyro bias, acc and gyro covariance
-   ** 2. normalize the acceleration measurenments to unit gravity **/
+  /*
+   * 假设启动阶段设备基本静止：加速度均值主要由重力贡献，角速度均值主要由陀螺
+   * 零偏贡献。这里跨多帧在线累计均值/方差，不要求一次收齐所有初始化样本。
+   */
   
   V3D cur_acc, cur_gyr;
   
@@ -179,6 +186,7 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
 
+    // Welford 风格的在线统计，避免保存全部初始化 IMU 样本。
     mean_acc      += (cur_acc - mean_acc) / N;
     mean_gyr      += (cur_gyr - mean_gyr) / N;
 
@@ -190,14 +198,18 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
     N ++;
   }
   state_ikfom init_state = kf_state.get_x();
+  // 初始 R_WI 取单位阵，因此世界系重力方向直接取静止加计均值的反方向。
+  // S2 固定其模长为 G_m_s2，只估计方向的两个自由度。
   init_state.grav = S2(- mean_acc / mean_acc.norm() * G_m_s2);
   
   //state_inout.rot = Eye3d; // Exp(mean_acc.cross(V3D(0, 0, -1 / scale_gravity)));
   init_state.bg  = mean_gyr;
+  // 外参既是滤波状态的一部分，也是点云去畸变和坐标变换的共同基准。
   init_state.offset_T_L_I = Lidar_T_wrt_IMU;
   init_state.offset_R_L_I = Lidar_R_wrt_IMU;
   kf_state.change_x(init_state);
 
+  // 外参、零偏和重力使用较小初始方差；若开启外参在线估计，后续 LiDAR 观测仍可修正它们。
   esekfom::esekf<state_ikfom, 12, input_ikfom>::cov init_P = kf_state.get_P();
   init_P.setIdentity();
   init_P(6,6) = init_P(7,7) = init_P(8,8) = 0.00001;
@@ -212,7 +224,7 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
 
 void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI &pcl_out)
 {
-  /*** add the imu of the last frame-tail to the of current frame-head ***/
+  // 拼入上一测量包最后一个 IMU，使当前包开头也有完整的积分区间。
   auto v_imu = meas.imu;
   v_imu.push_front(last_imu_);
   const double &imu_beg_time = rclcpp::Time(v_imu.front()->header.stamp).seconds();
@@ -220,18 +232,19 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   const double &pcl_beg_time = meas.lidar_beg_time;
   const double &pcl_end_time = meas.lidar_end_time;
   
-  /*** sort point clouds by offset time ***/
+  // curvature 被预处理模块复用为“点相对帧首的时间偏移”，单位为毫秒。
+  // 按时间排序后可从帧尾反向线性扫描，每个点只访问一次。
   pcl_out = *(meas.lidar);
   sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);
   // cout<<"[ IMU Process ]: Process lidar from "<<pcl_beg_time<<" to "<<pcl_end_time<<", " \
   //          <<meas.imu.size()<<" imu msgs from "<<imu_beg_time<<" to "<<imu_end_time<<endl;
 
-  /*** Initialize IMU pose ***/
+  // 保存每个 IMU 时刻的前向传播结果，稍后作为帧内连续轨迹的分段锚点。
   state_ikfom imu_state = kf_state.get_x();
   IMUpose.clear();
   IMUpose.push_back(set_pose6d(0.0, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.toRotationMatrix()));
 
-  /*** forward propagation at each imu point ***/
+  /*** 在每一对相邻 IMU 测量之间做中值积分和 ESEKF 前向传播 ***/
   V3D angvel_avr, acc_avr, acc_imu, vel_imu, pos_imu;
   M3D R_imu;
 
@@ -248,6 +261,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
     if (tail_stamp < last_lidar_end_time_)    continue;
     
+    // 中值法使用区间两端测量的均值，比单端欧拉积分更准确。
     angvel_avr<<0.5 * (head->angular_velocity.x + tail->angular_velocity.x),
                 0.5 * (head->angular_velocity.y + tail->angular_velocity.y),
                 0.5 * (head->angular_velocity.z + tail->angular_velocity.z);
@@ -257,7 +271,8 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
     // fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
 
-    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;
+    // 某些驱动输出的加速度量纲/尺度不严格为 m/s^2，用初始化均值标定到 9.81。
+    acc_avr = acc_avr * G_m_s2 / mean_acc.norm();
 
     if(head_stamp < last_lidar_end_time_)
     {
@@ -271,13 +286,14 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     
     in.acc = acc_avr;
     in.gyro = angvel_avr;
+    // Q 的四个 3x3 对角块对应 ng、na、nbg、nba，predict 同时传播 x 和 P。
     Q.block<3, 3>(0, 0).diagonal() = cov_gyr;
     Q.block<3, 3>(3, 3).diagonal() = cov_acc;
     Q.block<3, 3>(6, 6).diagonal() = cov_bias_gyr;
     Q.block<3, 3>(9, 9).diagonal() = cov_bias_acc;
     kf_state.predict(dt, Q, in);
 
-    /* save the poses at each IMU measurements */
+    // 保存扣除零偏后的角速度、世界系线加速度和帧末状态，用于点级运动补偿。
     imu_state = kf_state.get_x();
     angvel_last = angvel_avr - imu_state.bg;
     acc_s_last  = imu_state.rot * (acc_avr - imu_state.ba);
@@ -289,7 +305,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     IMUpose.push_back(set_pose6d(offs_t, acc_s_last, angvel_last, imu_state.vel, imu_state.pos, imu_state.rot.toRotationMatrix()));
   }
 
-  /*** calculated the pos and attitude prediction at the frame-end ***/
+  // 最后一条 IMU 通常不精确落在 LiDAR 帧末，补一小段正向或反向传播到帧末时刻。
   double note = pcl_end_time > imu_end_time ? 1.0 : -1.0;
   dt = note * (pcl_end_time - imu_end_time);
   kf_state.predict(dt, Q, in);
@@ -298,7 +314,10 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
   last_imu_ = meas.imu.back();
   last_lidar_end_time_ = pcl_end_time;
 
-  /*** undistort each lidar point (backward propagation) ***/
+  /*
+   * 从晚到早遍历点云。这里的“反向”是遍历方向，不是让 EKF 倒着积分：每个点时刻
+   * 的 R_i、p_i 由已保存的 IMU 锚点做区间内插值，然后统一变换到扫描末 LiDAR 系 L_e。
+   */
   if (pcl_out.points.begin() == pcl_out.points.end()) return;
   auto it_pcl = pcl_out.points.end() - 1;
   for (auto it_kp = IMUpose.end() - 1; it_kp != IMUpose.begin(); it_kp--)
@@ -316,10 +335,13 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     {
       dt = it_pcl->curvature / double(1000) - head->offset_time;
 
-      /* Transform to the 'end' frame, using only the rotation
-       * Note: Compensation direction is INVERSE of Frame's moving direction
-       * So if we want to compensate a point at timestamp-i to the frame-e
-       * P_compensate = R_imu_e ^ T * (R_i * P_i + T_ei) where T_ei is represented in global frame */
+      /*
+       * 点 P_Li 的完整坐标链：
+       *   P_Ii = R_IL * P_Li + p_IL
+       *   P_W  = R_WIi * P_Ii + p_WIi
+       *   P_Le = R_IL^T * (R_WIe^T * (P_W - p_WIe) - p_IL)
+       * T_ei 正是 p_WIi - p_WIe；最终所有点都位于扫描末时刻的 LiDAR 坐标系。
+       */
       M3D R_i(R_imu * Exp(angvel_avr, dt));
       
       V3D P_i(it_pcl->x, it_pcl->y, it_pcl->z);
@@ -346,7 +368,7 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
 
   if (imu_need_init_)
   {
-    /// The very first lidar frame
+    // 初始化持续 MAX_INI_COUNT 个测量包；期间只累计统计量，不输出去畸变点云参与建图。
     IMU_init(meas, kf_state, init_iter_num);
 
     imu_need_init_ = true;

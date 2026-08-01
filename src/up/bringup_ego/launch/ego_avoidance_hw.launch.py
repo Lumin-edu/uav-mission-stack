@@ -5,7 +5,7 @@ EGO 自主避障硬件启动文件。
   1. Livox MID-360 激光雷达驱动
   2. Point-LIO 建图（里程计 + 点云）
   3. Point-LIO → PX4 视觉里程计桥接
-  4. 规划高度融合：Point-LIO XY/姿态 + PX4 测距融合 Z/VZ
+  4. 规划位姿融合：Point-LIO base 中心 XY/姿态 + PX4 测距融合 Z/VZ
   5. EGO 规划器 + 轨迹服务器
   6. ego_px4_bridge：EGO → PX4 Offboard 控制桥接
   7. startup_goal：启动时发布初始目标
@@ -15,13 +15,15 @@ EGO 自主避障硬件启动文件。
 完整数据流：
   Livox /livox/lidar + /livox/imu
     → Point-LIO /odom + /cloud_registered
+    → base_link(IMU) 到 base(机体中心)杆臂补偿
     → (verified visual odom bridge) → PX4 EKF2 horizontal position
-    → (planner altitude fusion + PX4 range-aided z) → /ego/odom_fused
+    → (base XY/姿态 + PX4 range-aided z + 点云 z 对齐) → /ego/odom_fused
     → (EGO planner) → /ego/position_cmd
     → (ego_px4_bridge) → PX4 TrajectorySetpoint
 
 坐标系约定：
   - Point-LIO/EGO 使用 ROS 标准系：x=前, y=左, z=上
+  - Point-LIO /odom 的 child=base_link 对应 IMU；EGO 的 child=base 对应机体中心
   - PX4 NED：x=前(N), y=右(E), z=下(D)
   - 转换矩阵：world_to_px4_rotation = [1,0,0, 0,-1,0, 0,0,-1]
   - startup_goal 的用户参数仍为任务系 (x右,y前,z上)，内部自动转 ROS 系
@@ -48,6 +50,12 @@ def generate_launch_description():
     raw_cloud_topic = LaunchConfiguration("cloud_topic")
     planner_odom_topic = LaunchConfiguration("planner_odom_topic")
     planner_cloud_topic = LaunchConfiguration("planner_cloud_topic")
+
+    # Point-LIO 的 base_link 是 MID360 IMU 原点，base 是无人机机体中心。
+    # 数值桥接、EGO 规划输入和 TF 树共用同一组 T_base_link_base，避免
+    # 三条链路中的外参出现偏差。
+    base_link_to_base_translation = [-0.011, -0.02329, -0.05588]
+    base_link_to_base_rotation_xyzw = [0.0, 0.0, 0.0, 1.0]
 
     # ========== Node 1: Livox MID-360 激光雷达驱动 ==========
     livox_driver = IncludeLaunchDescription(
@@ -82,6 +90,10 @@ def generate_launch_description():
                 "px4_local_topic": "/fmu/out/vehicle_local_position",
                 "timesync_topic": "/fmu/out/timesync_status",
                 "output_topic": "/fmu/in/vehicle_visual_odometry",
+                "pointlio_pose_frame": "base_link",
+                "vehicle_frame": "base",
+                "base_link_to_base_translation": base_link_to_base_translation,
+                "base_link_to_base_rotation_xyzw": base_link_to_base_rotation_xyzw,
                 "publish_rate_limit": 50.0,
                 "align_when_px4_valid": True,
                 "use_px4_reference": False,
@@ -106,9 +118,9 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 4: Point-LIO XY + PX4 range-aided Z for EGO ==========
-    # This adapter is planning-only. The verified Point-LIO -> PX4 visual odom
-    # path above remains connected to raw Point-LIO and is not modified.
+    # ========== Node 4: base-center XY/姿态 + PX4 range-aided Z ==========
+    # 规划适配层先把 Point-LIO base_link/IMU 位姿补偿到 base，再使用 PX4
+    # 测高反算 z，并用相同 z 校正量对齐世界系点云。
     planner_altitude_fusion = Node(
         package="hx_bringup_ego",
         executable="planner_altitude_fusion.py",
@@ -123,6 +135,9 @@ def generate_launch_description():
                 "fused_cloud_topic": planner_cloud_topic,
                 "health_topic": "/ego/height_fusion_healthy",
                 "correction_topic": "/ego/pointlio_z_correction",
+                "vehicle_frame": "base",
+                "base_link_to_base_translation": base_link_to_base_translation,
+                "base_link_to_base_rotation_xyzw": base_link_to_base_rotation_xyzw,
                 "require_rangefinder": LaunchConfiguration("require_rangefinder_height"),
                 "max_px4_age_sec": 0.30,
                 "max_odom_age_sec": 0.30,
@@ -133,9 +148,31 @@ def generate_launch_description():
         ],
     )
 
+    # Point-LIO 动态发布 odom -> base_link；这里补齐固定的 base_link -> base。
+    # 静态 TF 用于补全 TF 树。planner_altitude_fusion 和 PX4 视觉里程计桥接
+    # 各自在数值入口使用同一外参，不读取该 TF，因此不会重复补偿。
+    base_link_to_base_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="base_link_to_base_tf",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("use_base_link_to_base_tf")),
+        arguments=[
+            "--x", str(base_link_to_base_translation[0]),
+            "--y", str(base_link_to_base_translation[1]),
+            "--z", str(base_link_to_base_translation[2]),
+            "--qx", str(base_link_to_base_rotation_xyzw[0]),
+            "--qy", str(base_link_to_base_rotation_xyzw[1]),
+            "--qz", str(base_link_to_base_rotation_xyzw[2]),
+            "--qw", str(base_link_to_base_rotation_xyzw[3]),
+            "--frame-id", "base_link",
+            "--child-frame-id", "base",
+        ],
+    )
+
     # ========== Node 5: EGO 规划器 ==========
     # 使用 EGO-Planner 进行局部轨迹规划与避障
-    # 关键 remap：odom_world → Point-LIO /odom, grid_map/cloud → /cloud_registered
+    # 关键 remap：odom_world → base 中心融合位姿，grid_map/cloud → z 对齐点云
     planner = Node(
         package="ego_planner",
         executable="ego_planner_node",
@@ -337,6 +374,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("require_rangefinder_height", default_value="true"),
             DeclareLaunchArgument("map_frame", default_value="odom"),
+            DeclareLaunchArgument("use_base_link_to_base_tf", default_value="true"),
             DeclareLaunchArgument(
                 "planner_config",
                 default_value=os.path.join(ego_hw_share, "config", "ego_planner_hw.yaml"),
@@ -379,6 +417,7 @@ def generate_launch_description():
             livox_driver,
             pointlio,
             pointlio_to_px4,
+            base_link_to_base_tf,
             planner_altitude_fusion,
             planner,
             trajectory_server,

@@ -22,6 +22,7 @@ extern std::vector<float> pointSearchSqDis;
 extern bool point_selected_surf[100000]; // = {0};
 extern std::vector<M3D> crossmat_list;
 extern int effct_feat_num;
+extern int last_effective_feat_num;
 extern int k;
 extern int idx;
 extern V3D angvel_avr, acc_avr, acc_avr_norm;

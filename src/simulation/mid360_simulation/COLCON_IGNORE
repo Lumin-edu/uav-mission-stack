@@ -1,0 +1,3 @@
+# This repository is retained as an upstream MID-360 simulation reference.
+# Its nested workspace duplicates livox_ros_driver2, which is already owned by
+# ../../driver/livox_ros_driver2 in the mission workspace.

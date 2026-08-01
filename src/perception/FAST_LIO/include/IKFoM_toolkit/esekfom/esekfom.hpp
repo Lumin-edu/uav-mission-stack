@@ -277,6 +277,7 @@ public:
 
 	// iterated error state EKF propogation
 	void predict(double &dt, processnoisecovariance &Q, const input &i_in){
+		// 连续时间模型及其雅可比由 use-ikfom.hpp 提供；oplus 在各自流形上积分名义状态。
 		flatted_state f_ = f(x_, i_in);
 		cov_ f_x_ = f_x(x_, i_in);
 		cov f_x_final;
@@ -286,6 +287,7 @@ public:
 		state x_before = x_;
 		x_.oplus(f_, dt);
 
+		// 以下代码把普通向量、SO(3) 和 S^2 各自的局部雅可比装配成离散状态转移矩阵。
 		F_x1 = cov::Identity();
 		for (std::vector<std::pair<std::pair<int, int>, int> >::iterator it = x_.vect_state.begin(); it != x_.vect_state.end(); it++) {
 			int idx = (*it).first.first;
@@ -378,6 +380,7 @@ public:
 		P_ = xp * P_ * xp.transpose() + (f_w1 * dt) * Q * (f_w1 * dt).transpose();
 	#else
 		F_x1 += f_x_final * dt;
+		// 一阶离散化：P_k+1 = F P_k F^T + G Q G^T；Q 为 IMU 与零偏过程噪声。
 		P_ = (F_x1) * P_ * (F_x1).transpose() + (dt * f_w_final) * Q * (dt * f_w_final).transpose();
 	#endif
 	}
@@ -1615,13 +1618,14 @@ public:
 		}
 	}
 	
-	//iterated error state EKF update modified for one specific system.
+	// FAST-LIO 专用的迭代误差状态 EKF：动态点面观测，且 H 只有前 12 列非零。
 	void update_iterated_dyn_share_modified(double R, double &solve_time) {
 		
 		dyn_share_datastruct<scalar_type> dyn_share;
 		dyn_share.valid = true;
 		dyn_share.converge = true;
 		int t = 0;
+		// 固定本帧 IMU 传播得到的先验。IEKF 各轮只重线性化观测，不重复消耗同一观测。
 		state x_propagated = x_;
 		cov P_propagated = P_;
 		int dof_Measurement; 
@@ -1633,6 +1637,7 @@ public:
 		for(int i=-1; i<maximum_iter; i++)
 		{
 			dyn_share.valid = true;	
+			// 回调 h_share_model：按当前迭代状态关联地图平面，返回创新 h=-r 和 N x 12 雅可比。
 			h_dyn_share(x_, dyn_share);
 
 			if(! dyn_share.valid)
@@ -1649,6 +1654,7 @@ public:
 			double solve_start = omp_get_wtime();
 			dof_Measurement = h_x_.rows();
 			vectorized_state dx;
+			// dx = x_iterated (-) x_prior，是当前迭代点相对固定先验的流形切空间误差。
 			x_.boxminus(dx, x_propagated);
 			dx_new = dx;
 			
@@ -1656,6 +1662,7 @@ public:
 			
 			P_ = P_propagated;
 			
+			// 将先验协方差从 x_propagated 的切空间搬运到当前线性化点 x_ 的切空间。
 			Matrix<scalar_type, 3, 3> res_temp_SO3;
 			MTK::vect<3, scalar_type> seg_SO3;
 			for (std::vector<std::pair<int, int> >::iterator it = x_.SO3_state.begin(); it != x_.SO3_state.end(); it++) {
@@ -1712,6 +1719,7 @@ public:
 			}
 			*/
 
+			// 测量少于状态维数时，直接在测量空间计算标准 Kalman 增益。
 			if(n > dof_Measurement)
 			{
 			//#ifdef USE_sparse
@@ -1744,6 +1752,8 @@ public:
 			}
 			else
 			{
+				// FAST-LIO 的常见路径：N 个有效点远多于 23 维状态。用信息形式只求逆 n x n
+				// 矩阵，避免对 N x N 的 (H P H^T + R) 求逆，计算量不随点数立方增长。
 			#ifdef USE_sparse
 				//Eigen::Matrix<scalar_type, n, n> b = Eigen::Matrix<scalar_type, n, n>::Identity();
 				//Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver; 
@@ -1812,8 +1822,10 @@ public:
 			}
 
 			//K_x = K_ * h_x_;
+			// IEKF 增量同时包含当前创新和“线性化点偏离先验”的补偿项。
 			Matrix<scalar_type, n, 1> dx_ = K_h + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new; 
 			state x_before = x_;
+			// boxplus 对向量做加法、对旋转做指数映射更新，保证状态始终留在对应流形上。
 			x_.boxplus(dx_);
 			dyn_share.converge = true;
 			for(int i = 0; i < n ; i++)
@@ -1831,6 +1843,7 @@ public:
 				dyn_share.converge = true;
 			}
 
+			// 连续两轮低于阈值，或达到最大次数时结束，并在最终切空间更新协方差。
 			if(t > 1 || i == maximum_iter - 1)
 			{
 				L_ = P_;
@@ -1921,6 +1934,7 @@ public:
 				// }
 				// else
 				//{
+					// 等价于 (I-KH)P；H 后 11 列为零，因此只需前 12 个观测相关状态块。
 					P_ = L_ - K_x.template block<n, 12>(0, 0) * P_.template block<12, n>(0, 0);
 				//}
 				solve_time += omp_get_wtime() - solve_start;

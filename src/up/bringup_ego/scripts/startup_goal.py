@@ -2,11 +2,11 @@
 """
 EGO 启动目标发布节点。
 
-在 Point-LIO 里程计和起飞流程都就绪后，向 EGO 规划器发布一个初始目标航点。
+在融合后的 base 机体中心里程计和起飞流程都就绪后，向 EGO 发布初始目标航点。
 这个节点只发布一次，然后退出。
 
 发布条件（三者同时满足）：
-  1. Point-LIO 里程计已收到有效数据
+  1. EGO 已收到有效的 base 机体中心融合里程计
   2. 起飞已完成（takeoff_ready 信号为 True，若 wait_for_takeoff_ready=True）
   3. 等待 startup_delay_sec 秒后
   4. EGO 规划器已订阅目标话题
@@ -26,10 +26,10 @@ from std_msgs.msg import Bool
 
 class StartupGoal(Node):
     """
-    在 Point-LIO 和起飞就绪后发布一次性 EGO 目标。
+    在 base 中心融合里程计和起飞就绪后发布一次性 EGO 目标。
 
     用户参数使用任务坐标系：x_right=机头右侧, y_forward=机头前方, z_up=向上。
-    内部自动转换为 EGO/Point-LIO 的 ROS 标准系 (x=前, y=左, z=上) 后发布。
+    内部自动转换为 EGO odom 的 ROS 标准系 (x=前, y=左, z=上) 后发布。
     """
 
     def __init__(self) -> None:
@@ -74,7 +74,7 @@ class StartupGoal(Node):
         self.sent = False
         self.create_timer(0.1, self.timer_callback)
         self.get_logger().info(
-            "Will publish one startup EGO goal after Point-LIO is ready: "
+            "Will publish one startup EGO goal after base-center odometry is ready: "
             f"x_right={self.goal_x:.2f}, y_forward={self.goal_y:.2f}, "
             f"z_up={self.goal_z:.2f} in {self.frame_id}, "
             f"wait_for_takeoff_ready={self.wait_for_takeoff_ready}"
@@ -86,7 +86,7 @@ class StartupGoal(Node):
             return
         if self.odom_ready_at is None:
             self.odom_ready_at = time.monotonic()
-            self.get_logger().info("Point-LIO odometry is ready.")
+            self.get_logger().info("EGO base-center odometry is ready.")
 
     def takeoff_ready_callback(self, msg: Bool) -> None:
         if not msg.data or self.takeoff_ready_at is not None:
@@ -99,7 +99,7 @@ class StartupGoal(Node):
         每 0.1 秒检查一次发布条件。
 
         等待条件：
-          1. Point-LIO 里程计已有有效数据（odom_ready_at 不为 None）
+          1. base 机体中心融合里程计已有有效数据（odom_ready_at 不为 None）
           2. 起飞已完成就绪（takeoff_ready_at 不为 None）
           3. 等待 startup_delay_sec 秒
           4. EGO 规划器已订阅目标话题

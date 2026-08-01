@@ -407,6 +407,48 @@ void Apply2DConstraintToCurrentState()
   }
 }
 
+template<typename FilterT>
+bool UpdateLidarWithInnovationGate(FilterT & filter, bool & rejected)
+{
+  rejected = false;
+  last_effective_feat_num = 0;
+  const auto predicted_state = filter.get_x();
+  const auto predicted_covariance = filter.get_P();
+  if (!filter.update_iterated_dyn_share_modified()) {
+    return false;
+  }
+  if (!lidar_innovation_gate_en) {
+    return true;
+  }
+
+  const auto & corrected_state = filter.get_x();
+  const double position_correction = (corrected_state.pos - predicted_state.pos).norm();
+  const Eigen::Matrix3d rotation_delta =
+    predicted_state.rot.transpose() * corrected_state.rot;
+  const double rotation_cosine = std::clamp(
+    (rotation_delta.trace() - 1.0) * 0.5, -1.0, 1.0);
+  const double rotation_correction_deg = std::acos(rotation_cosine) * 180.0 / M_PI;
+
+  if (
+    position_correction <= max_lidar_position_correction &&
+    rotation_correction_deg <= max_lidar_rotation_correction_deg) {
+    return true;
+  }
+
+  auto state_to_restore = predicted_state;
+  auto covariance_to_restore = predicted_covariance;
+  filter.change_x(state_to_restore);
+  filter.change_P(covariance_to_restore);
+  rejected = true;
+  RCLCPP_WARN(
+    LOGGER,
+    "Rejecting LiDAR correction: position=%.3f m (limit %.3f), rotation=%.2f deg "
+    "(limit %.2f). Keeping the IMU-predicted state and excluding this frame from the map.",
+    position_correction, max_lidar_position_correction, rotation_correction_deg,
+    max_lidar_rotation_correction_deg);
+  return false;
+}
+
 void SigHandle(int sig)
 {
   flg_exit = true;
@@ -807,10 +849,29 @@ int main(int argc, char ** argv)
   Eigen::Matrix<double, 24, 24> Q_input = process_noise_cov_input();
   Eigen::Matrix<double, 30, 30> Q_output = process_noise_cov_output();
   /*** debug record ***/
-  FILE * fp;
-  string pos_log_dir = root_dir + "/Log/pos_log.txt";
-  fp = fopen(pos_log_dir.c_str(), "w");
-  open_file();
+  FILE * fp = nullptr;
+  if (runtime_pos_log) {
+    const auto log_dir = std::filesystem::path(root_dir) / "Log";
+    std::error_code log_error;
+    std::filesystem::create_directories(log_dir, log_error);
+    if (log_error) {
+      RCLCPP_WARN(
+        LOGGER, "Point-LIO could not create runtime log directory '%s': %s",
+        log_dir.string().c_str(), log_error.message().c_str());
+      runtime_pos_log = false;
+    } else {
+      const auto pos_log_path = log_dir / "pos_log.txt";
+      fp = fopen(pos_log_path.string().c_str(), "w");
+      if (fp == nullptr) {
+        RCLCPP_WARN(
+          LOGGER, "Point-LIO could not open runtime log '%s'; disabling runtime logging.",
+          pos_log_path.string().c_str());
+        runtime_pos_log = false;
+      } else {
+        open_file();
+      }
+    }
+  }
 
   /*** ROS subscribe initialization ***/
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc;
@@ -1039,6 +1100,11 @@ int main(int argc, char ** argv)
       t2 = omp_get_wtime();
 
       /*** iterated state estimation ***/
+      bool lidar_frame_rejected = false;
+      bool lidar_update_succeeded = false;
+      int lidar_update_attempts = 0;
+      int lidar_update_successes = 0;
+      int max_effective_features = 0;
       crossmat_list.resize(feats_down_size);
       pbody_list.resize(feats_down_size);
       // pbody_ext_list.reserve(feats_down_size);
@@ -1175,10 +1241,21 @@ int main(int argc, char ** argv)
               idx += time_seq[k];
               continue;
             }
-            if (!kf_output.update_iterated_dyn_share_modified()) {
+            bool update_rejected = false;
+            lidar_update_attempts++;
+            const bool update_succeeded =
+              UpdateLidarWithInnovationGate(kf_output, update_rejected);
+            max_effective_features = std::max(max_effective_features, last_effective_feat_num);
+            if (!update_succeeded) {
               idx = idx + time_seq[k];
+              if (update_rejected) {
+                lidar_frame_rejected = true;
+                break;
+              }
               continue;
             }
+            lidar_update_succeeded = true;
+            lidar_update_successes++;
             Apply2DConstraint(kf_output.x_);
             solve_start = omp_get_wtime();
 
@@ -1366,10 +1443,21 @@ int main(int argc, char ** argv)
               idx += time_seq[k];
               continue;
             }
-            if (!kf_input.update_iterated_dyn_share_modified()) {
+            bool update_rejected = false;
+            lidar_update_attempts++;
+            const bool update_succeeded =
+              UpdateLidarWithInnovationGate(kf_input, update_rejected);
+            max_effective_features = std::max(max_effective_features, last_effective_feat_num);
+            if (!update_succeeded) {
               idx = idx + time_seq[k];
+              if (update_rejected) {
+                lidar_frame_rejected = true;
+                break;
+              }
               continue;
             }
+            lidar_update_succeeded = true;
+            lidar_update_successes++;
             Apply2DConstraint(kf_input.x_);
 
             solve_start = omp_get_wtime();
@@ -1464,6 +1552,24 @@ int main(int argc, char ** argv)
           }
         }
       }
+      if (lidar_frame_rejected) {
+        for (size_t i = 0; i < feats_down_body->size(); ++i) {
+          pointBodyToWorld(&feats_down_body->points[i], &feats_down_world->points[i]);
+        }
+      }
+      const bool lidar_frame_constrained = lidar_update_succeeded && !lidar_frame_rejected;
+      if (!lidar_frame_constrained) {
+        RCLCPP_WARN_THROTTLE(
+          LOGGER, *nh->get_clock(), 2000,
+          "Point-LIO frame has no accepted LiDAR constraint; excluding it from the local map. "
+          "effective_features=%d updates=%d/%d downsampled_points=%d",
+          max_effective_features, lidar_update_successes, lidar_update_attempts, feats_down_size);
+      } else {
+        RCLCPP_INFO_THROTTLE(
+          LOGGER, *nh->get_clock(), 2000,
+          "Point-LIO tracking: effective_features=%d updates=%d/%d downsampled_points=%d",
+          max_effective_features, lidar_update_successes, lidar_update_attempts, feats_down_size);
+      }
       // M3D rot_cur_lidar;
       // {
       //     rot_cur_lidar = state.rot_end;
@@ -1480,10 +1586,12 @@ int main(int argc, char ** argv)
       /*** add the feature points to map ***/
       t3 = omp_get_wtime();
       if (feats_down_size > 4) {
-        MapIncremental();
+        if (lidar_frame_constrained) {
+          MapIncremental();
+        }
         if (async_map_worker) {
           async_map_worker->enqueue(make_map_frame_snapshot(lidar_end_time, scan_body_pub_en));
-        } else if (
+        } else if (lidar_frame_constrained &&
           lio_operation_mode != "online_odom" && lio_operation_mode != "offline_map" && map_pub_en) {
           update_map_publish_cache();
           map_publish_frame_count++;
@@ -1493,7 +1601,7 @@ int main(int argc, char ** argv)
           }
         }
         if (
-          pcd_save_en && pcd_save_period_sec > 0.0 && !async_map_worker &&
+          lidar_frame_constrained && pcd_save_en && pcd_save_period_sec > 0.0 && !async_map_worker &&
           lio_operation_mode != "online_odom") {
           save_period_frame_count++;
           const int frames_per_save =
@@ -1514,8 +1622,8 @@ int main(int argc, char ** argv)
 
       if ((t5 - t0) > lidar_time_inte) {
         odom_overrun_count++;
-        RCLCPP_WARN(
-          LOGGER,
+        RCLCPP_WARN_THROTTLE(
+          LOGGER, *nh->get_clock(), 2000,
           "Point-LIO realtime warning: odometry loop overrun. mode=%s loop=%.4f s "
           "lidar_interval=%.4f s map_update=%.4f s lidar_q=%zu imu_q=%zu odom_overrun=%llu",
           lio_operation_mode.c_str(), t5 - t0, lidar_time_inte, t5 - t3, lidar_buffer.size(),
@@ -1561,7 +1669,9 @@ int main(int argc, char ** argv)
                      << feats_undistort->points.size() << '\n';
           }
         }
-        dump_lio_state_to_log(fp);
+        if (fp != nullptr) {
+          dump_lio_state_to_log(fp);
+        }
       }
     }
     if (!offline_mode) {
@@ -1586,5 +1696,8 @@ int main(int argc, char ** argv)
   }
   fout_out.close();
   fout_imu_pbp.close();
+  if (fp != nullptr) {
+    fclose(fp);
+  }
   return 0;
 }

@@ -46,7 +46,6 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
-find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
@@ -93,7 +92,6 @@ ament_target_dependencies(pointlio_mapping
   nav_msgs
   sensor_msgs
   visualization_msgs
-  pcl_ros
   pcl_conversions
   tf2_ros
   livox_ros_driver2
@@ -123,7 +121,6 @@ ament_export_dependencies(
   geometry_msgs
   nav_msgs
   sensor_msgs
-  pcl_ros
   pcl_conversions
   tf2_ros
   livox_ros_driver2

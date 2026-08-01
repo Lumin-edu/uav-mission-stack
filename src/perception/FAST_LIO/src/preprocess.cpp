@@ -52,6 +52,8 @@ void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg
 
 void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
 {
+  // 各雷达驱动的逐点时间单位不同，统一换算为毫秒并写入 PointType::curvature。
+  // 后续帧末时间估计和 IMU 去畸变都依赖这个约定，不能把 curvature 当几何曲率使用。
   switch (time_unit)
   {
     case SEC:
@@ -112,6 +114,8 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
   }
   uint valid_num = 0;
 
+  // FAST-LIO2 推荐 feature_enabled=false：保留通过盲区/重复点检查的原始点，
+  // scan-to-map 阶段直接建立点面约束；true 则启用 FAST-LIO1 风格的特征筛选。
   if (feature_enabled)
   {
     for (uint i = 1; i < plsize; i++)
@@ -177,8 +181,9 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
           pl_full[i].y = msg->points[i].y;
           pl_full[i].z = msg->points[i].z;
           pl_full[i].intensity = msg->points[i].reflectivity;
+          // Livox offset_time 单位为 ns，除以 1e6 后得到相对帧首的 ms。
           pl_full[i].curvature = msg->points[i].offset_time /
-                                 float(1000000);  // use curvature as time of each laser points, curvature unit: ms
+                                 float(1000000);
 
           if (((abs(pl_full[i].x - pl_full[i - 1].x) > 1e-7)
               || (abs(pl_full[i].y - pl_full[i - 1].y) > 1e-7)
@@ -306,7 +311,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr
     return;
   pl_surf.reserve(plsize);
 
-  /*** These variables only works when no point timestamps given ***/
+  // 若数据没有逐点时间戳，则按每条扫描线的方位角与转速估算相对时间；精度会低于硬件时间戳。
   double omega_l = 0.361 * SCAN_RATE;  // scan angular velocity
   std::vector<bool> is_first(N_SCANS, true);
   std::vector<double> yaw_fp(N_SCANS, 0.0);    // yaw of first scan point

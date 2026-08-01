@@ -1,0 +1,20 @@
+/**:
+  ros__parameters:
+    sector_front_topic: /sim/mid360/sector_front
+    sector_left_topic: /sim/mid360/sector_left
+    sector_rear_topic: /sim/mid360/sector_rear
+    sector_right_topic: /sim/mid360/sector_right
+    output_topic: /livox/lidar
+    frame_id: livox_frame
+    scan_period_sec: 0.1
+    sync_tolerance_sec: 0.06
+    # Gazebo GPU rays emit a second snapshot a few milliseconds after the
+    # main 10 Hz frame. Do not merge and publish that duplicate as a new scan.
+    min_publish_interval_sec: 0.05
+    min_range_m: 0.5
+    max_range_m: 70.0
+    max_points_per_scan: 24000
+    # Gazebo publishes each sector as a completed scan snapshot. Match that
+    # timestamp to the simulated IMU instead of fabricating Livox timing.
+    stamp_at_scan_end: true
+    zero_point_offsets: true

@@ -3,8 +3,8 @@
 EGO 硬件管线诊断监控节点。
 
 监控 EGO 自主避障完整数据链路的状态：
-  1. Point-LIO 里程计 (/odom)
-  2. Point-LIO 点云 (/cloud_registered)
+  1. EGO base 机体中心融合里程计 (/ego/odom_fused)
+  2. 高度对齐后的世界系点云 (/ego/cloud_registered_fused)
   3. EGO 轨迹指令 (/ego/position_cmd)
   4. PX4 视觉里程计输入 (/fmu/in/vehicle_visual_odometry)
   5. PX4 本地位置 (/fmu/out/vehicle_local_position)
@@ -177,7 +177,7 @@ class EgoHardwareMonitor(Node):
 
         # 9 项检查：6 项数据新鲜度 + 2 项 PX4 有效性 + 1 项发布者数量
         checks = [
-            (odom_age <= self.max_odom_age, "Point-LIO odometry is missing or stale"),
+            (odom_age <= self.max_odom_age, "EGO base-center odometry is missing or stale"),
             (cloud_age <= self.max_cloud_age, "registered obstacle cloud is missing or stale"),
             (command_age <= self.max_command_age, "EGO trajectory command is missing or stale"),
             (visual_odom_age <= self.max_px4_age, "PX4 visual odometry input is missing or stale"),

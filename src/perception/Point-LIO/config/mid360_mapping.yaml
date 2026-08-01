@@ -37,6 +37,9 @@
             satu_gyro: 35.0                                 # Gyroscope saturation threshold used by IMU residual gating.
             acc_norm: 1.0                                   # Gravity magnitude unit of the IMU acceleration input: 1.0 for g, 9.81 for m/s^2.
             lidar_meas_cov: 0.01                            # Measurement covariance assigned to LiDAR constraints.
+            lidar_innovation_gate_en: True                  # Reject an implausible single-scan ICP correction while retaining the IMU prediction.
+            max_lidar_position_correction: 0.5              # Maximum position correction from one LiDAR update; this is not a vehicle speed limit.
+            max_lidar_rotation_correction_deg: 20.0         # Maximum attitude correction from one LiDAR update, in degrees.
             acc_cov_output: 500.0                           # Process covariance of acceleration in the output-state model.
             gyr_cov_output: 1000.0                          # Process covariance of angular rate in the output-state model.
             b_acc_cov: 0.0001                               # Random walk covariance of accelerometer bias.
@@ -50,10 +53,10 @@
             ivox_grid_resolution: 2.0                       # Resolution of the iVox map grid in meters.
             gravity: [ 0.0, 0.0, -9.810 ]                   # Gravity vector used by the estimator state.
             gravity_init: [ 0.0, 0.0, -9.810 ]              # Initial gravity guess used during startup alignment.
-            extrinsic_T: [ 0.0, 0.0, 0.10 ]      # LiDAR translation in the IMU/body frame, in meters.
-            extrinsic_R: [ 1.0, 0.0, 0.0,
-                           0.0, 1.0, 0.0,
-                           0.0, 0.0, 1.0 ]                 # LiDAR rotation in the IMU/body frame, stored as a row-major rotation matrix.
+            extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+            extrinsic_R: [ 1, 0, 0,
+                           0, 1, 0,
+                           0, 0, 1]                 # LiDAR rotation in the IMU/body frame, stored as a row-major rotation matrix.
 
         odometry:
             publish_odometry_without_downsample: False      # True publishes odometry at point/update timing instead of after scan downsampling.

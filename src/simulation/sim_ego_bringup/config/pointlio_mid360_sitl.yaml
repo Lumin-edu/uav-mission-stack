@@ -1,0 +1,117 @@
+/**:
+  ros__parameters:
+    # Gazebo publishes /clock. Only Point-LIO consumes sensor timestamps, while
+    # the PX4 DDS bridges retain wall-clock timestamps for PX4 compatibility.
+    use_sim_time: true
+    # Gazebo publishes completed-scan snapshots with zero per-point duration.
+    # Use the IMU-input state pipeline for this simulation timing model. The
+    # hardware profile remains on its verified output-state pipeline because
+    # real MID-360 packets contain per-point acquisition offsets.
+    use_imu_as_input: true
+    prop_at_freq_of_imu: true
+    check_satu: true
+    init_map_size: 100
+    # Keep the 10 Hz estimator loop below its frame period on this machine.
+    # The real-aircraft profile remains independently tuned for real packets.
+    point_filter_num: 6
+    space_down_sample: true
+    filter_size_surf: 0.20
+    filter_size_map_internal: 0.20
+    filter_size_map_publish: 0.50
+    filter_size_map_save: 0.20
+    ivox_nearby_type: 6
+    runtime_pos_log_enable: false
+
+    # EGO needs registered clouds while odometry remains realtime. Point-LIO
+    # publishes those clouds from its asynchronous mapping worker in this mode.
+    lio:
+      operation_mode: online_odom_async_map
+    
+    common:
+      # Identical ingress interfaces to the real MID-360 driver. In SITL the
+      # GPU sensor adapter owns these topics; on hardware livox_ros_driver2 does.
+      lid_topic: /livox/lidar
+      imu_topic: /livox/imu
+      con_frame: false
+      con_frame_num: 1
+      cut_frame: false
+      cut_frame_time_interval: 0.1
+      # The simulation adapter publishes the completed LiDAR frame at the
+      # same clock instant as Gazebo IMU data and sets all point offsets to 0.
+      # Keep this at zero; the real MID-360 driver also uses zero here.
+      time_diff_lidar_to_imu: 0.0
+      # Gazebo gives a completed-frame snapshot, so all simulated points have
+      # the same acquisition timestamp. Hardware keeps the default false.
+      allow_zero_lidar_duration: true
+
+    preprocess:
+      lidar_type: 1
+      scan_line: 4
+      timestamp_unit: 3
+      blind: 0.5
+
+    mapping:
+      imu_en: true
+      extrinsic_est_en: false
+      imu_time_inte: 0.005
+      lidar_time_inte: 0.1
+      satu_acc: 30.0
+      satu_gyro: 35.0
+      # Gazebo's IMU sensor publishes SI acceleration, unlike the real MID-360
+      # configuration that uses g as its input unit.
+      acc_norm: 9.81
+      lidar_meas_cov: 0.01
+      # Gate the ICP correction relative to the IMU prediction. These values
+      # are not limits on the aircraft's actual displacement or attitude.
+      lidar_innovation_gate_en: true
+      max_lidar_position_correction: 0.25
+      max_lidar_rotation_correction_deg: 10.0
+      acc_cov_output: 500.0
+      gyr_cov_output: 1000.0
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      imu_meas_acc_cov: 0.01
+      imu_meas_omg_cov: 0.01
+      gyr_cov_input: 0.01
+      acc_cov_input: 0.1
+      plane_thr: 0.1
+      match_s: 81.0
+      ivox_grid_resolution: 2.0
+      gravity: [0.0, 0.0, -9.810]
+      gravity_init: [0.0, 0.0, -9.810]
+      # The simulated IMU and LiDAR origins are coincident. Keep the measured
+      # real-aircraft extrinsics in the hardware Point-LIO configuration.
+      extrinsic_T: [0.0, 0.0, 0.0]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+
+    odometry:
+      publish_odometry_without_downsample: false
+      enable_2d_mode: false
+
+    publish:
+      path_en: true
+      scan_publish_en: true
+      scan_bodyframe_pub_en: true
+      map_publish_en: true
+      map_publish_interval: 20
+      tf_send_en: true
+      odom_topic: /sim/pointlio/odom
+      cloud_registered_topic: /sim/pointlio/cloud_registered
+      cloud_registered_body_topic: /sim/pointlio/cloud_registered_body
+      map_topic: /sim/pointlio/map_cloud
+      path_topic: /sim/pointlio/path
+
+    frame:
+      odom_frame_id: world
+      base_frame_id: base_link
+      cloud_registered_frame_id: world
+      cloud_registered_body_frame_id: base_link
+      map_frame_id: world
+
+    pcd_save:
+      pcd_save_en: false
+      save_on_shutdown: true
+      save_period_sec: 0.0
+      save_path: /home/wu/sim-ego/scenarios/pointlio_sitl_map.pcd

@@ -4,6 +4,7 @@
 
 ```text
 Point-LIO /odom
+  -> base_link 到 base 机体中心补偿
   -> scripts/pointlio_to_px4_visual_odom.py
   -> /fmu/in/vehicle_visual_odometry
   -> PX4 EKF2
@@ -11,6 +12,25 @@ Point-LIO /odom
   -> scripts/full_mission_controller.py
   -> /fmu/in/trajectory_setpoint
 ```
+
+## Point-LIO 机体中心补偿
+
+Point-LIO 继续发布 `odom -> base_link`，其中 `base_link` 的数值对应 MID360 IMU
+原点。修正后的机体中心统一命名为 `base`：
+
+```text
+T_odom_base = T_odom_base_link * T_base_link_base
+t_base_link_base = [-0.011, -0.02329, -0.05588] m
+q_base_link_base_xyzw = [0, 0, 0, 1]
+```
+
+launch 同时发布固定 TF `base_link -> base`，用于补全
+`odom -> base_link -> base`。桥接节点在记录初始参考点前只做一次相同的数值补偿，
+然后沿用本包原有的 `base -> PX4 NED` 轴向、零点和航向转换。静态 TF 不参与
+PX4 消息计算，因此不会重复补偿。
+
+位置对比节点订阅实际发送给 PX4 的 `/fmu/in/vehicle_visual_odometry`，不再使用
+原始 `/odom`，这样比较的是修正后 `base` 的 NED 增量。
 
 source /opt/ros/humble/setup.bash
 source install/setup.bash
@@ -122,8 +142,8 @@ drop_port:=/dev/ttyUSB1
 实际执行命令格式：
 
 ```bash
-python3 /home/venom/venom/paotou.py --port <drop_port> --angle <角度>
-python3 /home/venom/venom/paotou.py --port /dev/ttyUSB0 --angle 90
+python3 <your_drop_script> --port <drop_port> --angle <角度>
+python3 <your_drop_script> --port /dev/ttyUSB0 --angle 90
 ```
 
 抛投角度按选择顺序分配：

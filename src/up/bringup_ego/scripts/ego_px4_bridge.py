@@ -6,14 +6,14 @@ EGO 规划器 → PX4 Offboard 桥接节点。
 转换到 PX4 NED 坐标系，并管理完整的 PX4 Offboard 进入/退出流程。
 
 工作流程：
-  1. 等待 Point-LIO 里程计和 PX4 本地位置就绪
+  1. 等待 EGO base 机体中心融合里程计和 PX4 本地位置就绪
   2. 捕获参考原点（EGO 世界系 + PX4 NED 系的对齐点）
   3. 若启用起飞，先飞到 takeoff_altitude 高度并稳定
   4. 起飞完成后，将 EGO 的 PositionCommand 逐步转换为 PX4 TrajectorySetpoint
   5. 如果 EGO 指令短暂丢失，保持最后安全位置（hold）
 
 坐标系说明：
-  - EGO/Point-LIO 使用 ROS 标准系：x=前, y=左, z=上
+  - EGO 融合里程计使用 ROS 标准系：x=前, y=左, z=上，位置对应 base
   - PX4 NED：x=前(N), y=右(E), z=下(D)
   - 转换矩阵 world_to_px4_rotation = [1,0,0, 0,-1,0, 0,0,-1]
     将 ROS 的 (前,左,上) 映射到 NED 的 (前,右,下)
@@ -269,7 +269,7 @@ class EgoPx4Bridge(Node):
         # ========== 状态变量 ==========
         self.latest_command: Optional[PositionCommand] = None     # 最新EGO轨迹指令
         self.latest_command_sec: Optional[float] = None
-        self.latest_ego_odom: Optional[Odometry] = None           # 最新Point-LIO里程计
+        self.latest_ego_odom: Optional[Odometry] = None           # 最新 EGO base 融合里程计
         self.latest_ego_odom_sec: Optional[float] = None
         self.latest_px4_position: Optional[VehicleLocalPosition] = None  # 最新PX4本地位置
         self.latest_vehicle_status: Optional[VehicleStatus] = None       # 最新PX4状态
@@ -395,7 +395,7 @@ class EgoPx4Bridge(Node):
         """
         捕获 EGO 世界系与 PX4 NED 系的参考原点。
 
-        当 Point-LIO 里程计和 PX4 本地位置都可用时，记录：
+        当 EGO base 融合里程计和 PX4 本地位置都可用时，记录：
           - reference_world: EGO 世界系下的起始位置
           - reference_px4: PX4 NED 下的起始位置
           - reference_px4_heading: PX4 初始偏航角
@@ -800,7 +800,7 @@ class EgoPx4Bridge(Node):
         # 步骤2：等待参考原点
         if self.reference_world is None:
             self.publish_offboard_mode(force_position=True)
-            self.warn_waiting("Waiting for Point-LIO and a valid PX4 takeoff reference")
+            self.warn_waiting("Waiting for EGO base odometry and a valid PX4 takeoff reference")
             return
         # 步骤3：起飞流程
         if not self.takeoff_complete:

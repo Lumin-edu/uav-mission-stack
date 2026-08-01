@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""
+正方形航点任务 Offboard 控制器。
+
+通过 PX4 Offboard 模式控制无人机依次飞过正方形的四个角点，
+最后回到起飞点并降落。坐标系基于任务初始时刻的机头方向，将任务坐标
+（x=机头右侧，y=机头前方，z=向上）转换到 PX4 本地 NED 坐标系。
+"""
 
 import math
 from dataclasses import dataclass
@@ -13,6 +20,12 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 @dataclass(frozen=True)
 class SquareWaypoint:
+    """任务坐标系航点（相对于起始位置）：
+    x_right: 机头右侧偏移 (m)
+    y_forward: 机头前方偏移 (m)
+    z_up: 向上偏移 (m)
+    label: 航点名称
+    """
     x_right: float
     y_forward: float
     z_up: float
@@ -20,6 +33,14 @@ class SquareWaypoint:
 
 
 class SquareMissionController(Node):
+    """
+    正方形任务状态机控制器。
+
+    状态流转：
+      WAITING_REFERENCE → 等待获取 PX4 本地位置作为参考原点
+      MISSION           → 执行正方形航点飞行任务
+      COMPLETED         → 任务完成，保持在降落后的 setpoint
+    """
     STATE_WAITING_REFERENCE = "waiting_reference"
     STATE_MISSION = "mission"
     STATE_COMPLETED = "completed"
@@ -34,25 +55,29 @@ class SquareMissionController(Node):
             depth=1,
         )
 
-        self.auto_arm = self.param_bool("auto_arm", False)
-        self.control_rate_hz = self.param_float("control_rate_hz", 50.0)
-        self.reference_capture_delay_sec = self.param_float("reference_capture_delay_sec", 3.0)
-        self.takeoff_altitude = self.param_float("takeoff_altitude", 0.30)
-        self.square_side_length = self.param_float("square_side_length", 1.0)
-        self.approach_speed = self.param_float("approach_speed", 1.0)
-        self.vertical_speed = self.param_float("vertical_speed", 0.20)
-        self.reach_xy_tol = self.param_float("reach_xy_tol", 0.20)
-        self.reach_z_tol = self.param_float("reach_z_tol", 0.10)
-        self.speed_xy_tol = self.param_float("speed_xy_tol", 0.20)
-        self.speed_z_tol = self.param_float("speed_z_tol", 0.15)
-        self.stable_time_sec = self.param_float("stable_time_sec", 0.6)
-        self.takeoff_hover_sec = self.param_float("takeoff_hover_sec", 0.6)
-        self.corner_hover_sec = self.param_float("corner_hover_sec", 0.6)
-        self.final_hover_sec = self.param_float("final_hover_sec", 0.6)
-        self.use_initial_heading_frame = self.param_bool("use_initial_heading_frame", True)
-        self.task_x_sign = self.param_axis_sign("task_x_sign", 1.0)
-        self.task_y_sign = self.param_axis_sign("task_y_sign", 1.0)
-        self.task_z_sign = self.param_axis_sign("task_z_sign", 1.0)
+        # ---------- 运动控制参数 ----------
+        self.auto_arm = self.param_bool("auto_arm", False)                        # 是否自动发送解锁指令
+        self.control_rate_hz = self.param_float("control_rate_hz", 50.0)          # 控制循环频率 (Hz)
+        self.reference_capture_delay_sec = self.param_float("reference_capture_delay_sec", 3.0)  # 启动后等待捕获参考位置的时间
+        self.takeoff_altitude = self.param_float("takeoff_altitude", 0.30)        # 起飞高度 (m)
+        self.square_side_length = self.param_float("square_side_length", 1.0)     # 正方形边长 (m)
+        self.approach_speed = self.param_float("approach_speed", 1.0)             # 水平接近速度 (m/s)
+        self.vertical_speed = self.param_float("vertical_speed", 0.20)            # 垂直爬升/下降速度 (m/s)
+        # ---------- 到点判定参数 ----------
+        self.reach_xy_tol = self.param_float("reach_xy_tol", 0.20)               # 水平位置容差 (m)
+        self.reach_z_tol = self.param_float("reach_z_tol", 0.10)                  # 垂直位置容差 (m)
+        self.speed_xy_tol = self.param_float("speed_xy_tol", 0.20)               # 水平速度容差 (m/s)
+        self.speed_z_tol = self.param_float("speed_z_tol", 0.15)                  # 垂直速度容差 (m/s)
+        self.stable_time_sec = self.param_float("stable_time_sec", 0.6)           # 要求连续稳定的时间 (s)
+        # ---------- 各阶段悬停时间 ----------
+        self.takeoff_hover_sec = self.param_float("takeoff_hover_sec", 0.6)       # 起飞后悬停时间
+        self.corner_hover_sec = self.param_float("corner_hover_sec", 0.6)         # 角点悬停时间
+        self.final_hover_sec = self.param_float("final_hover_sec", 0.6)           # 任务完成后悬停时间
+        # ---------- 坐标系参数 ----------
+        self.use_initial_heading_frame = self.param_bool("use_initial_heading_frame", True)  # 是否基于初始机头方向旋转任务坐标
+        self.task_x_sign = self.param_axis_sign("task_x_sign", 1.0)               # x 轴方向符号翻转
+        self.task_y_sign = self.param_axis_sign("task_y_sign", 1.0)               # y 轴方向符号翻转
+        self.task_z_sign = self.param_axis_sign("task_z_sign", 1.0)               # z 轴方向符号翻转
         self.vehicle_local_position_topic = self.param_string(
             "vehicle_local_position_topic", "/fmu/out/vehicle_local_position"
         )
@@ -63,9 +88,12 @@ class SquareMissionController(Node):
         self.validate_parameters()
 
         self.timer_period = 1.0 / self.control_rate_hz
+        # Offboard 模式需要在真正启用前预发一定数量的 setpoint 数据流
         self.offboard_prestream_cycles = max(10, int(2.0 * self.control_rate_hz))
+        # 到点稳定所需连续周期数
         self.stable_cycles_required = max(1, int(self.stable_time_sec * self.control_rate_hz))
 
+        # ---------- 向 PX4 发送的三大 Offboard 话题 ----------
         self.offboard_control_mode_pub = self.create_publisher(
             OffboardControlMode, "/fmu/in/offboard_control_mode", qos
         )
@@ -76,6 +104,7 @@ class SquareMissionController(Node):
             VehicleCommand, "/fmu/in/vehicle_command", qos
         )
 
+        # ---------- 从 PX4 订阅的状态反馈 ----------
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
         self.create_subscription(
@@ -91,12 +120,13 @@ class SquareMissionController(Node):
             qos,
         )
 
+        # ---------- 状态机初始化为等待参考位置 ----------
         self.state = self.STATE_WAITING_REFERENCE
         self.reference_capture_ready_sec = self.now_sec() + self.reference_capture_delay_sec
         self.reference_captured = False
         self.armed = False
         self.offboard_enabled = False
-        self.offboard_setpoint_counter = 0
+        self.offboard_setpoint_counter = 0    # Offboard 预流计数器
         self.last_arm_request_us = 0
         self.last_offboard_request_us = 0
         self.waiting_for_reference_logged = False
@@ -104,14 +134,15 @@ class SquareMissionController(Node):
         self.waiting_for_offboard_logged = False
         self.completion_logged = False
 
-        self.start_local: Optional[list[float]] = None
-        self.task_waypoints: list[SquareWaypoint] = []
-        self.local_waypoints: list[list[float]] = []
-        self.commanded_local: Optional[list[float]] = None
-        self.locked_yaw = 0.0
-        self.waypoint_index = 0
-        self.stable_cycles = 0
-        self.hold_start_sec: Optional[float] = None
+        # ---------- 任务坐标数据 ----------
+        self.start_local: Optional[list[float]] = None       # 起始 PX4 位置（NED）
+        self.task_waypoints: list[SquareWaypoint] = []       # 任务坐标系下的航点列表
+        self.local_waypoints: list[list[float]] = []         # 转换到 PX4 NED 后的航点列表
+        self.commanded_local: Optional[list[float]] = None   # 当前指令位置（逐步逼近目标）
+        self.locked_yaw = 0.0                                # 锁定在起始时刻的机头偏航角
+        self.waypoint_index = 0                              # 当前执行到的航点索引
+        self.stable_cycles = 0                               # 当前已连续稳定的周期数
+        self.hold_start_sec: Optional[float] = None           # 到达航点后开始悬停的时间
 
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
 
@@ -210,6 +241,16 @@ class SquareMissionController(Node):
         return 0.0
 
     def build_task_waypoints(self) -> list[SquareWaypoint]:
+        """
+        构建任务坐标系下的正方形航点序列。
+        航线顺序（相对于起始位置，任务坐标系）：
+          0. 起飞悬停点
+          1. 前方（front_left_corner）
+          2. 右前方（front_right_corner）
+          3. 右后方（rear_right_corner）
+          4. 回到起飞点上方
+          5. 下降到起始高度（模拟降落）
+        """
         side = self.square_side_length
         z = self.takeoff_altitude
         return [
@@ -222,16 +263,26 @@ class SquareMissionController(Node):
         ]
 
     def vehicle_local_position_callback(self, msg: VehicleLocalPosition) -> None:
+        """
+        PX4 本地位置回调。
+        当 PX4 EKF2 位置有效且超过捕获延迟后，将当前 PX4 位置作为任务原点，
+        并锁定当前机头偏航角用于后续坐标转换。
+        """
         self.vehicle_local_position = msg
+        # 只有在 PX4 EKF2 位置有效且尚未捕获参考时才进行捕获
         if self.reference_captured or not (msg.xy_valid and msg.z_valid):
             return
         if self.now_sec() < self.reference_capture_ready_sec:
             return
 
+        # 记录起始 PX4 本地位置作为任务原点
         self.start_local = [float(msg.x), float(msg.y), float(msg.z)]
+        # 锁定初始机头偏航角
         self.locked_yaw = self.current_px4_yaw()
+        # 构建任务航点并转换到 NED
         self.task_waypoints = self.build_task_waypoints()
         self.local_waypoints = [self.task_waypoint_to_local(wp) for wp in self.task_waypoints]
+        # 初始化指令位置为第一个航点
         self.commanded_local = list(self.local_waypoints[0])
         self.reference_captured = True
         self.waiting_for_reference_logged = False
@@ -260,17 +311,39 @@ class SquareMissionController(Node):
             self.waiting_for_offboard_logged = False
 
     def task_waypoint_to_local(self, waypoint: SquareWaypoint) -> list[float]:
+        """
+        将任务坐标系航点转换为 PX4 NED 本地坐标系。
+
+        任务坐标系约定：
+          x_right: 初始时刻机头右侧为正
+          y_forward: 初始时刻机头前方为正
+          z_up: 向上为正
+
+        PX4 NED 约定：
+          N = 北 = 初始机头前方
+          E = 东 = 初始机头右侧
+          D = 下 = -z_up
+
+        转换步骤：
+          1. 应用符号翻转 (task_x_sign, task_y_sign, task_z_sign)
+          2. 如果 use_initial_heading_frame，绕锁定的初始偏航角旋转到 NED
+          3. z_up 方向上，NED 的下方向为 -z_up
+        """
         if self.start_local is None:
             return [0.0, 0.0, 0.0]
 
+        # 应用符号翻转
         x_right = self.task_x_sign * waypoint.x_right
         y_forward = self.task_y_sign * waypoint.y_forward
         z_up = self.task_z_sign * waypoint.z_up
 
         if self.use_initial_heading_frame:
+            # 绕初始偏航角旋转到 PX4 NED 坐标系
             c = math.cos(self.locked_yaw)
             s = math.sin(self.locked_yaw)
+            # dx = 机头前方在 NED 北方向的分量 - 机头右侧在东方向的分量
             dx = y_forward * c - x_right * s
+            # dy = 机头前方在东方向的分量 + 机头右侧在北方向的分量
             dy = y_forward * s + x_right * c
         else:
             dx = y_forward
@@ -279,7 +352,7 @@ class SquareMissionController(Node):
         return [
             self.start_local[0] + dx,
             self.start_local[1] + dy,
-            self.start_local[2] - z_up,
+            self.start_local[2] - z_up,  # PX4 NED: D轴向下为负
         ]
 
     def transition_to(self, new_state: str) -> None:
@@ -381,9 +454,19 @@ class SquareMissionController(Node):
         self.vehicle_command_pub.publish(msg)
 
     def handle_offboard_entry(self) -> None:
+        """
+        Offboard 模式进入序列管理。
+
+        流程：
+          1. 先预发一定数量的 OffboardControlMode + TrajectorySetpoint 数据流（prestream）
+          2. 若 auto_arm=false，等待遥控器手动解锁
+          3. 若 auto_arm=true，自动发送解锁指令
+          4. 解锁后发送 Offboard 模式切换指令
+        """
         if not self.reference_captured:
             return
 
+        # 预流阶段：持续发 setpoint 数据给 PX4，作为 Offboard 模式的"心跳"
         if self.offboard_setpoint_counter < self.offboard_prestream_cycles:
             self.offboard_setpoint_counter += 1
             return
@@ -403,6 +486,7 @@ class SquareMissionController(Node):
                 )
             return
 
+        # 已解锁，请求进入 Offboard 模式
         if not self.offboard_enabled and now_us - self.last_offboard_request_us >= 1_000_000:
             self.publish_vehicle_command(
                 VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
@@ -415,10 +499,17 @@ class SquareMissionController(Node):
             self.get_logger().info("Waiting for PX4 to enter Offboard mode.")
 
     def move_towards_xy_z(self, current: list[float], target: list[float]) -> list[float]:
+        """
+        逐周期向目标位置逼近。
+
+        水平和垂直方向分别以 approach_speed 和 vertical_speed 限速，
+        当距离小于单步长时直接跳到目标位置，避免振荡。
+        """
         dx = target[0] - current[0]
         dy = target[1] - current[1]
         dz = target[2] - current[2]
 
+        # 水平方向：按 approach_speed 限速移动
         xy_dist = math.hypot(dx, dy)
         xy_step = self.approach_speed * self.timer_period
         if xy_dist <= xy_step or xy_dist <= 1.0e-6:
@@ -429,6 +520,7 @@ class SquareMissionController(Node):
             next_x = current[0] + dx * scale
             next_y = current[1] + dy * scale
 
+        # 垂直方向：按 vertical_speed 限速移动
         z_step = self.vertical_speed * self.timer_period
         if abs(dz) <= z_step:
             next_z = target[2]
@@ -440,6 +532,13 @@ class SquareMissionController(Node):
         return [next_x, next_y, next_z]
 
     def target_is_stable(self, target: list[float]) -> bool:
+        """
+        到点判定：同时满足位置误差和速度误差要求。
+        - 水平误差 <= reach_xy_tol
+        - 高度误差 <= reach_z_tol
+        - 水平速度 <= speed_xy_tol
+        - 垂直速度 <= speed_z_tol
+        """
         dx = float(self.vehicle_local_position.x) - target[0]
         dy = float(self.vehicle_local_position.y) - target[1]
         dz = float(self.vehicle_local_position.z) - target[2]
@@ -464,10 +563,20 @@ class SquareMissionController(Node):
         return self.stable_cycles >= self.stable_cycles_required
 
     def update_mission_target(self) -> None:
+        """
+        每周期更新指令位置（commanded_local）。
+
+        执行流程：
+          1. 将 commanded_local 向当前目标航点逐步逼近
+          2. 检查当前指令位置是否已稳定在目标上
+          3. 若稳定，开始计时悬停
+          4. 悬停时间足够后，推进到下一个航点
+        """
         if not self.reference_captured or self.commanded_local is None:
             return
 
         if self.state == self.STATE_COMPLETED:
+            # 任务完成后持续发射最终航点 setpoint
             self.commanded_local = list(self.local_waypoints[-1])
             return
 
@@ -475,11 +584,14 @@ class SquareMissionController(Node):
             return
 
         target = self.active_target()
+        # 按限速逐步逼近目标
         self.commanded_local = self.move_towards_xy_z(self.commanded_local, target)
 
+        # 检查是否已稳定到达目标
         if not self.count_stable_or_reset(target):
             return
 
+        # 首次稳定时记录悬停起始时间
         if self.hold_start_sec is None:
             self.hold_start_sec = self.now_sec()
             self.get_logger().info(
@@ -487,11 +599,23 @@ class SquareMissionController(Node):
                 f"holding for {self.hold_seconds_for_active_waypoint():.1f} s."
             )
 
+        # 悬停时间足够后推进到下一航点
         if self.now_sec() - self.hold_start_sec >= self.hold_seconds_for_active_waypoint():
             self.commanded_local = list(target)
             self.advance_waypoint()
 
     def timer_callback(self) -> None:
+        """
+        主控制循环回调（默认 50Hz）。
+
+        每个周期执行：
+          1. 发布 OffboardControlMode（告诉 PX4 使用位置控制）
+          2. 若尚未捕获参考位置，等待 PX4 本地位置有效
+          3. 更新任务目标（逐步逼近当前航点）
+          4. 发布 TrajectorySetpoint
+          5. 处理 Offboard 模式进入序列（解锁、切换模式）
+        """
+        # 1. 发布 Offboard 控制模式（必须持续发布，否则 PX4 会退出 Offboard）
         self.publish_offboard_control_mode()
 
         if not self.reference_captured:
@@ -502,8 +626,10 @@ class SquareMissionController(Node):
                 )
             return
 
+        # 2-3. 更新任务目标并发布 setpoint
         self.update_mission_target()
         self.publish_trajectory_setpoint()
+        # 4. 管理 Offboard 进入流程
         self.handle_offboard_entry()
 
 

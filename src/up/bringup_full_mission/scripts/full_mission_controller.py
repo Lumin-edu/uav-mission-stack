@@ -174,7 +174,9 @@ class FullMissionController(Node):
         self.task_y_sign = self.param_axis_sign("task_y_sign", 1.0)
         self.task_z_sign = self.param_axis_sign("task_z_sign", 1.0)
         self.selected_tasks_text = self.param_string("selected_tasks", "6")
-        self.drop_command = self.param_string("drop_command", "/home/venom/venom/paotou.py")
+        # The actuator script is site-specific and must be supplied explicitly
+        # on the launch command line before enabling a drop task.
+        self.drop_command = self.param_string("drop_command", "")
         self.drop_port = self.param_string("drop_port", "/dev/ttyUSB0")
         self.vehicle_local_position_topic = self.param_string(
             "vehicle_local_position_topic", "/fmu/out/vehicle_local_position"

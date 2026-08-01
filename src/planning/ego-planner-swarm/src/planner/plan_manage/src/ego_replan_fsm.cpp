@@ -1,6 +1,8 @@
 
 #include <ego_planner/ego_replan_fsm.h>
 
+#include <cmath>
+
 namespace ego_planner
 {
 
@@ -41,6 +43,8 @@ namespace ego_planner
     node_->declare_parameter("fsm/realworld_experiment", false);
     node_->declare_parameter("fsm/fail_safe", true);
     node_->declare_parameter("fsm/manual_goal_z", 1.5);
+    node_->declare_parameter("fsm/validate_goal_occupancy", false);
+    node_->declare_parameter("fsm/require_occupancy_for_goal", false);
 
     node_->get_parameter("fsm/flight_type", target_type_);
     node_->get_parameter("fsm/thresh_replan_time", replan_thresh_);
@@ -51,6 +55,8 @@ namespace ego_planner
     node_->get_parameter("fsm/realworld_experiment", flag_realworld_experiment_);
     node_->get_parameter("fsm/fail_safe", enable_fail_safe_);
     node_->get_parameter("fsm/manual_goal_z", manual_goal_z_);
+    node_->get_parameter("fsm/validate_goal_occupancy", validate_goal_occupancy_);
+    node_->get_parameter("fsm/require_occupancy_for_goal", require_occupancy_for_goal_);
 
     have_trigger_ = !flag_realworld_experiment_;
 
@@ -269,16 +275,57 @@ namespace ego_planner
      * 解析 x/y 作为目标位置，z 若 < 0.05 则使用 manual_goal_z_ 默认高度。
      * 调用 planNextWaypoint 启动全局轨迹规划。
      */
-    if (msg->pose.position.z < -0.1)
+    const auto &position = msg->pose.position;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    {
+      RCLCPP_ERROR(node_->get_logger(), "Goal rejected because its position is not finite.");
+      return;
+    }
+
+    if (position.z < -0.1)
       return;
 
+    const double goal_z = position.z > 0.05 ? position.z : manual_goal_z_;
+    Eigen::Vector3d end_wp(position.x, position.y, goal_z);
+    if (!end_wp.allFinite())
+    {
+      RCLCPP_ERROR(node_->get_logger(), "Goal rejected because its resolved position is not finite.");
+      return;
+    }
+
+    if (validate_goal_occupancy_)
+    {
+      auto map = planner_manager_->grid_map_;
+      if (require_occupancy_for_goal_ && !map->hasOccupancyObservation())
+      {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "Goal rejected because no occupancy observation is available yet; holding position.");
+        visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1.0, 0.0, 0.0, 1.0), 0.5, 999);
+        return;
+      }
+
+      const int goal_occupancy = map->getInflateOccupancy(end_wp);
+      if (goal_occupancy != 0)
+      {
+        if (goal_occupancy < 0)
+        {
+          RCLCPP_ERROR(node_->get_logger(),
+                       "Goal rejected because it is outside the EGO map: (%.2f, %.2f, %.2f); holding position.",
+                       end_wp.x(), end_wp.y(), end_wp.z());
+        }
+        else
+        {
+          RCLCPP_ERROR(node_->get_logger(),
+                       "Goal rejected because it lies in inflated occupancy: (%.2f, %.2f, %.2f); holding position.",
+                       end_wp.x(), end_wp.y(), end_wp.z());
+        }
+        visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1.0, 0.0, 0.0, 1.0), 0.5, 999);
+        return;
+      }
+    }
+
     cout << "Triggered!" << endl;
-
     init_pt_ = odom_pos_;
-
-    const double goal_z = msg->pose.position.z > 0.05 ? msg->pose.position.z : manual_goal_z_;
-    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, goal_z);
-
     planNextWaypoint(end_wp);
   }
 

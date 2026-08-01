@@ -16,7 +16,13 @@ def generate_launch_description():
     use_px4_monitor = LaunchConfiguration("use_px4_monitor")
     use_px4_control_watchdog = LaunchConfiguration("use_px4_control_watchdog")
     use_position_compare = LaunchConfiguration("use_position_compare")
+    use_base_link_to_base_tf = LaunchConfiguration("use_base_link_to_base_tf")
     pointlio_config_file = LaunchConfiguration("pointlio_config_file")
+
+    # Point-LIO base_link 对应 IMU 原点，base 对应补偿后的机体中心。
+    # 数值桥接和静态 TF 共用同一对象，避免外参配置不一致。
+    base_link_to_base_translation = [-0.011, -0.02329, -0.05588]
+    base_link_to_base_rotation_xyzw = [0.0, 0.0, 0.0, 1.0]
 
     pointlio_share = get_package_share_directory("point_lio")
     pointlio_launch = os.path.join(pointlio_share, "launch", "mapping_headless.launch.py")
@@ -42,6 +48,10 @@ def generate_launch_description():
                 "px4_local_topic": "/fmu/out/vehicle_local_position",
                 "timesync_topic": "/fmu/out/timesync_status",
                 "output_topic": "/fmu/in/vehicle_visual_odometry",
+                "pointlio_pose_frame": "base_link",
+                "vehicle_frame": "base",
+                "base_link_to_base_translation": base_link_to_base_translation,
+                "base_link_to_base_rotation_xyzw": base_link_to_base_rotation_xyzw,
                 "publish_rate_limit": 50.0,
                 "align_when_px4_valid": True,
                 "use_px4_reference": False,
@@ -59,6 +69,27 @@ def generate_launch_description():
                 "velocity_variance": 0.25,
                 "print_rate": LaunchConfiguration("visual_odom_print_rate"),
             }
+        ],
+    )
+
+    # Point-LIO 动态发布 odom -> base_link；这里补全固定的 base_link -> base。
+    # 桥接节点不读取 TF，因此不会改变或重复执行原有的 base -> PX4 NED 转换。
+    base_link_to_base_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="base_link_to_base_tf",
+        output="screen",
+        condition=IfCondition(use_base_link_to_base_tf),
+        arguments=[
+            "--x", str(base_link_to_base_translation[0]),
+            "--y", str(base_link_to_base_translation[1]),
+            "--z", str(base_link_to_base_translation[2]),
+            "--qx", str(base_link_to_base_rotation_xyzw[0]),
+            "--qy", str(base_link_to_base_rotation_xyzw[1]),
+            "--qz", str(base_link_to_base_rotation_xyzw[2]),
+            "--qw", str(base_link_to_base_rotation_xyzw[3]),
+            "--frame-id", "base_link",
+            "--child-frame-id", "base",
         ],
     )
 
@@ -217,9 +248,8 @@ def generate_launch_description():
         parameters=[
             {
                 "px4_topic": "/fmu/out/vehicle_local_position",
-                "pointlio_topic": "/odom",
+                "visual_odom_topic": "/fmu/in/vehicle_visual_odometry",
                 "print_rate": 2.0,
-                "pointlio_y_to_px4_y_sign": -1.0,
             }
         ],
     )
@@ -231,6 +261,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_px4_monitor", default_value="false"),
             DeclareLaunchArgument("use_px4_control_watchdog", default_value="true"),
             DeclareLaunchArgument("use_position_compare", default_value="false"),
+            DeclareLaunchArgument("use_base_link_to_base_tf", default_value="true"),
             DeclareLaunchArgument("pointlio_config_file", default_value=default_pointlio_config),
             DeclareLaunchArgument("visual_odom_print_rate", default_value="1.0"),
             DeclareLaunchArgument("auto_arm", default_value="false"),
@@ -248,7 +279,9 @@ def generate_launch_description():
             DeclareLaunchArgument("drop_hover_sec", default_value="0.6"),
             DeclareLaunchArgument("land_hover_sec", default_value="0.6"),
             DeclareLaunchArgument("action_timeout_sec", default_value="8.0"),
-            DeclareLaunchArgument("drop_command", default_value="/home/venom/venom/paotou.py"),
+            # Hardware-specific actuator command. Keep it empty by default so
+            # this workspace never invokes a path belonging to another host.
+            DeclareLaunchArgument("drop_command", default_value=""),
             DeclareLaunchArgument("drop_port", default_value="/dev/ttyUSB0"),
             DeclareLaunchArgument("enable_d435i_drop_alignment", default_value="true"),
             DeclareLaunchArgument("visual_correction_speed", default_value="0.10"),
@@ -321,6 +354,7 @@ def generate_launch_description():
             px4_dds_monitor,
             px4_control_watchdog,
             px4_pointlio_position_compare,
+            base_link_to_base_tf,
             pointlio_to_px4_visual_odom,
             pointlio_mapping,
             full_mission_controller,

@@ -143,6 +143,13 @@ geometry_msgs::msg::PoseStamped msg_body_pose;
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
+/*
+ * 本文件统一采用三套坐标系：
+ *   L：LiDAR 坐标系；I：IMU/机体坐标系；W：建图世界坐标系（camera_init）。
+ * 点变换为 P_W = R_WI * (R_IL * P_L + p_IL) + p_WI。
+ * offset_R_L_I / offset_T_L_I 虽然命名较旧，实际含义就是 R_IL / p_IL。
+ */
+
 void SigHandle(int sig)
 {
     flg_exit = true;
@@ -239,6 +246,7 @@ void lasermap_fov_segment()
     kdtree_delete_time = 0.0;    
     pointBodyToWorld(XAxisPoint_body, XAxisPoint_world);
     V3D pos_LiD = pos_lid;
+    // 局部地图是围绕 LiDAR 活动区域、边长 cube_len 的滑动立方体，不是完整全局地图的复制。
     if (!Localmap_Initialized){
         for (int i = 0; i < 3; i++){
             LocalMap_Points.vertex_min[i] = pos_LiD(i) - cube_len / 2.0;
@@ -247,6 +255,7 @@ void lasermap_fov_segment()
         Localmap_Initialized = true;
         return;
     }
+    // 当 LiDAR 接近任一边界时平移地图盒；否则 ikd-Tree 保持不变，避免每帧删除点。
     float dist_to_map_edge[3][2];
     bool need_move = false;
     for (int i = 0; i < 3; i++){
@@ -257,6 +266,7 @@ void lasermap_fov_segment()
     if (!need_move) return;
     BoxPointType New_LocalMap_Points, tmp_boxpoints;
     New_LocalMap_Points = LocalMap_Points;
+    // 移动距离既要重新留出探测范围，也不能太小而造成频繁来回移动。
     float mov_dist = max((cube_len - 2.0 * MOV_THRESHOLD * DET_RANGE) * 0.5 * 0.9, double(DET_RANGE * (MOV_THRESHOLD -1)));
     for (int i = 0; i < 3; i++){
         tmp_boxpoints = LocalMap_Points;
@@ -274,6 +284,7 @@ void lasermap_fov_segment()
     }
     LocalMap_Points = New_LocalMap_Points;
 
+    // cub_needrm 保存平移后落在新局部盒之外的长条区域，ikd-Tree 可按盒批量懒删除。
     points_cache_collect();
     double delete_begin = omp_get_wtime();
     if(cub_needrm.size() > 0) kdtree_delete_counter = ikdtree.Delete_Point_Boxes(cub_needrm);
@@ -386,7 +397,10 @@ bool sync_packages(MeasureGroup &meas)
         return false;
     }
 
-    /*** push a lidar scan ***/
+    /*
+     * 先锁定队首 LiDAR 帧，但在 IMU 尚未覆盖帧末时不弹出它。lidar_pushed 保证定时器
+     * 下次进入时继续等待同一帧，而不会重复计算帧末时间。
+     */
     if(!lidar_pushed)
     {
         meas.lidar = lidar_buffer.front();
@@ -403,6 +417,7 @@ bool sync_packages(MeasureGroup &meas)
         else
         {
             scan_num ++;
+            // curvature 在预处理中存的是毫秒，因此除以 1000 得到相对帧首的秒数。
             lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000);
             lidar_mean_scantime += (meas.lidar->points.back().curvature / double(1000) - lidar_mean_scantime) / scan_num;
         }
@@ -412,12 +427,13 @@ bool sync_packages(MeasureGroup &meas)
         lidar_pushed = true;
     }
 
+    // 必须等 IMU 时间越过扫描末端，才能完整传播并把所有点补偿到帧末。
     if (last_timestamp_imu < lidar_end_time)
     {
         return false;
     }
 
-    /*** push imu data, and pop from imu buffer ***/
+    // 收集不晚于帧末的 IMU；跨帧积分所需的末条样本由 ImuProcess::last_imu_ 保存。
     double imu_time = get_time_sec(imu_buffer.front()->header.stamp);
     meas.imu.clear();
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
@@ -443,9 +459,12 @@ void map_incremental()
     PointNoNeedDownsample.reserve(feats_down_size);
     for (int i = 0; i < feats_down_size; i++)
     {
-        /* transform to world frame */
+        // 必须使用 LiDAR 更新后的最优状态变换到世界系，避免把预测误差固化进地图。
         pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
-        /* decide if need add to map */
+        /*
+         * ikd-Tree 的体素降采样策略：一个 filter_size_map_min 体素尽量只保留最靠近
+         * 体素中心的点。Nearest_Points 来自最后一次观测线性化，可直接复用以减少搜索。
+         */
         if (!Nearest_Points[i].empty() && flg_EKF_inited)
         {
             const PointVector &points_near = Nearest_Points[i];
@@ -456,6 +475,7 @@ void map_incremental()
             mid_point.y = floor(feats_down_world->points[i].y/filter_size_map_min)*filter_size_map_min + 0.5 * filter_size_map_min;
             mid_point.z = floor(feats_down_world->points[i].z/filter_size_map_min)*filter_size_map_min + 0.5 * filter_size_map_min;
             float dist  = calc_dist(feats_down_world->points[i],mid_point);
+            // 邻近点不在当前体素时直接插入，并关闭树内体素替换，保留空间覆盖。
             if (fabs(points_near[0].x - mid_point.x) > 0.5 * filter_size_map_min && fabs(points_near[0].y - mid_point.y) > 0.5 * filter_size_map_min && fabs(points_near[0].z - mid_point.z) > 0.5 * filter_size_map_min){
                 PointNoNeedDownsample.push_back(feats_down_world->points[i]);
                 continue;
@@ -478,6 +498,7 @@ void map_incremental()
     }
 
     double st_time = omp_get_wtime();
+    // true：由 ikd-Tree 在体素内执行下采样；false：点已由上面的逻辑判定为直接加入。
     add_point_size = ikdtree.Add_Points(PointToAdd, true);
     ikdtree.Add_Points(PointNoNeedDownsample, false); 
     add_point_size = PointToAdd.size() + PointNoNeedDownsample.size();
@@ -681,7 +702,11 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     corr_normvect->clear(); 
     total_residual = 0.0; 
 
-    /** closest surface search and residual computation **/
+    /*
+     * 每次 IEKF 迭代都会用当前状态重新计算残差；只有 ekfom_data.converge=true 时
+     * 才重做 kNN。初轮会匹配；大修正阶段复用对应以稳定且节省计算，修正量降到阈值
+     * 后再匹配一次，用新对应继续检验是否真正收敛。
+     */
     #ifdef MP_EN
         omp_set_num_threads(MP_PROC_NUM);
         #pragma omp parallel for
@@ -691,7 +716,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         PointType &point_body  = feats_down_body->points[i]; 
         PointType &point_world = feats_down_world->points[i]; 
 
-        /* transform to world frame */
+        // 当前迭代状态下将扫描末 LiDAR 点投到世界系：P_W = R_WI(R_IL P_L+p_IL)+p_WI。
         V3D p_body(point_body.x, point_body.y, point_body.z);
         V3D p_global(s.rot * (s.offset_R_L_I*p_body + s.offset_T_L_I) + s.pos);
         point_world.x = p_global(0);
@@ -705,7 +730,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
 
         if (ekfom_data.converge)
         {
-            /** Find the closest surfaces in the map **/
+            // 在增量地图中取 5 个近邻；最远近邻平方距离超过 5 时拒绝该对应。
             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
             point_selected_surf[i] = points_near.size() < NUM_MATCH_POINTS ? false : pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
         }
@@ -716,7 +741,9 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         point_selected_surf[i] = false;
         if (esti_plane(pabcd, points_near, 0.1f))
         {
+            // 已归一化平面 n^T P_W+d=0，因此 pd2 就是带符号点到平面距离。
             float pd2 = pabcd(0) * point_world.x + pabcd(1) * point_world.y + pabcd(2) * point_world.z + pabcd(3);
+            // 距离残差相对量程过大时剔除，抑制动态物体、边缘和错误数据关联。
             float s = 1 - 0.9 * fabs(pd2) / sqrt(p_body.norm());
 
             if (s > 0.9)
@@ -756,7 +783,11 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     match_time  += omp_get_wtime() - match_start;
     double solve_start_  = omp_get_wtime();
     
-    /*** Computation of Measuremnt Jacobian matrix H and measurents vector ***/
+    /*
+     * LiDAR 残差只直接依赖 [p_WI, R_WI, R_IL, p_IL]，所以这里构造 N x 12 的稠密 H。
+     * 速度、零偏和重力对应的其余 11 列在滤波器内部补零；它们通过先验协方差的
+     * 交叉项被间接修正。
+     */
     ekfom_data.h_x = MatrixXd::Zero(effct_feat_num, 12); //23
     ekfom_data.h.resize(effct_feat_num);
 
@@ -774,7 +805,11 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         const PointType &norm_p = corr_normvect->points[i];
         V3D norm_vec(norm_p.x, norm_p.y, norm_p.z);
 
-        /*** calculate the Measuremnt Jacobian matrix H ***/
+        /*
+         * 对 r = n_W^T P_W + d 在流形切空间线性化。C=R_WI^T n_W 把法向量转到
+         * IMU 系；A、B 分别是机体姿态和外参旋转扰动的系数。12 列依次为：
+         * delta_p、delta_theta、delta_theta_ext、delta_t_ext。
+         */
         V3D C(s.rot.conjugate() *norm_vec);
         V3D A(point_crossmat * C);
         if (extrinsic_est_en)
@@ -787,7 +822,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
             ekfom_data.h_x.block<1, 12>(i,0) << norm_p.x, norm_p.y, norm_p.z, VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
         }
 
-        /*** Measuremnt: distance to the closest surface/corner ***/
+        // 目标残差为 0，创新量写成 -r；IEKF 求得增量后通过 boxplus 注入名义状态。
         ekfom_data.h(i) = -norm_p.intensity;
     }
     solve_time += omp_get_wtime() - solve_start_;
@@ -900,6 +935,7 @@ public:
         p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
         p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
+        // 23 个局部误差分量的收敛阈值；观测回调 h_share_model 在每轮迭代被调用。
         fill(epsi, epsi+23, 0.001);
         kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);
 
@@ -957,6 +993,7 @@ public:
 private:
     void timer_callback()
     {
+        // 一帧 FAST-LIO2 主循环：同步 -> IMU 传播/去畸变 -> scan-to-map IEKF -> 增量建图。
         if(sync_packages(Measures))
         {
             if (flg_first_scan)
@@ -976,6 +1013,7 @@ private:
             svd_time   = 0;
             t0 = omp_get_wtime();
 
+            // 初始化完成后，Process 使 kf 位于 LiDAR 帧末，点云也统一到帧末 L 系。
             p_imu->Process(Measures, kf, feats_undistort);
             state_point = kf.get_x();
             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
@@ -988,15 +1026,15 @@ private:
 
             flg_EKF_inited = (Measures.lidar_beg_time - first_lidar_time) < INIT_TIME ? \
                             false : true;
-            /*** Segment the map in lidar FOV ***/
+            // 根据预测的 LiDAR 位置滑动局部地图并删除远离当前视域的旧点。
             lasermap_fov_segment();
 
-            /*** downsample the feature points in a scan ***/
+            // FAST-LIO2 默认不提取边/面特征，直接对原始去畸变点做体素降采样。
             downSizeFilterSurf.setInputCloud(feats_undistort);
             downSizeFilterSurf.filter(*feats_down_body);
             t1 = omp_get_wtime();
             feats_down_size = feats_down_body->points.size();
-            /*** initialize the map kdtree ***/
+            // 第一帧可用点只负责建立地图；没有先验地图时无法形成 scan-to-map 约束。
             if(ikdtree.Root_Node == nullptr)
             {
                 RCLCPP_INFO(this->get_logger(), "Initialize the map kdtree");
@@ -1017,7 +1055,10 @@ private:
             
             // cout<<"[ mapping ]: In num: "<<feats_undistort->points.size()<<" downsamp "<<feats_down_size<<" Map num: "<<featsFromMapNum<<"effect num:"<<effct_feat_num<<endl;
 
-            /*** ICP and iterated Kalman filter update ***/
+            /*
+             * 这不是“ICP 先求位姿、EKF 再融合”的松耦合结构。点面残差直接作为 IEKF
+             * 观测，IMU 传播产生的状态与协方差就是本轮先验，因此属于紧耦合更新。
+             */
             if (feats_down_size < 5)
             {
                 RCLCPP_WARN(this->get_logger(), "No point, skip this scan!\n");
@@ -1046,7 +1087,7 @@ private:
 
             t2 = omp_get_wtime();
             
-            /*** iterated state estimation ***/
+            // 每轮：当前状态投点 -> ikd-Tree 匹配/拟合平面 -> 构造 H,r -> IEKF 流形更新。
             double t_update_start = omp_get_wtime();
             double solve_H_time = 0;
             kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
@@ -1063,7 +1104,7 @@ private:
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped_, tf_broadcaster_);
 
-            /*** add the feature points to map kdtree ***/
+            // 完成状态修正后再插入当前帧，防止当前扫描与自身匹配并保持地图一致性。
             t3 = omp_get_wtime();
             map_incremental();
             t5 = omp_get_wtime();

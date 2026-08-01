@@ -1,0 +1,128 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Ground Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Reference Frame: <Fixed Frame>
+      Cell Size: 1
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Color: 120; 120; 120
+      Alpha: 0.45
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Obstacle Cloud
+      Topic: /map_generator/global_cloud
+      Queue Size: 10
+      Size (Pixels): 3
+      Style: Points
+      Color Transformer: FlatColor
+      Color: 255; 170; 0
+      Alpha: 0.85
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Executed Path
+      Topic: /sim/odom_path
+      Line Style: Lines
+      Line Width: 0.08
+      Color: 40; 220; 120
+      Alpha: 1
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Command Path
+      Topic: /sim/command_path
+      Line Style: Lines
+      Line Width: 0.05
+      Color: 80; 150; 255
+      Alpha: 0.9
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Waypoint Path
+      Topic: /sim/waypoint_path
+      Line Style: Lines
+      Line Width: 0.12
+      Color: 255; 40; 220
+      Alpha: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Waypoints
+      Topic: /sim/waypoints
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: UAV Odometry
+      Topic: /sim/odom
+      Keep: 1
+      Shape:
+        Alpha: 1
+        Axes Length: 0.6
+        Axes Radius: 0.04
+        Color: 255; 255; 255
+        Head Length: 0.2
+        Head Radius: 0.08
+        Shaft Length: 0.5
+        Shaft Radius: 0.04
+        Value: Axes
+      Covariance:
+        Position:
+          Color: 255; 255; 0
+          Alpha: 0.3
+          Scale: 1
+        Orientation:
+          Color: 255; 0; 255
+          Alpha: 0.3
+          Scale: 1
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Frame Timeout: 15
+      Marker Scale: 0.7
+      Show Axes: true
+      Show Names: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Name: World Axes
+      Length: 1
+      Radius: 0.05
+      Reference Frame: <Fixed Frame>
+  Enabled: true
+  Global Options:
+    Background Color: 25; 25; 30
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic: /clicked_point
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 25
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1
+      Pitch: 0.8
+      Yaw: 0.8
+  Window Geometry:
+    Height: 900
+    Width: 1500
+    X: 50
+    Y: 50

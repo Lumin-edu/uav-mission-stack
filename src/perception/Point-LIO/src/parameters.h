@@ -64,6 +64,8 @@ extern float DET_RANGE;
 extern bool imu_en;
 extern double imu_time_inte;
 extern double laser_point_cov, acc_norm;
+extern bool lidar_innovation_gate_en;
+extern double max_lidar_position_correction, max_lidar_rotation_correction_deg;
 extern double acc_cov_input, gyr_cov_input, vel_cov;
 extern double gyr_cov_output, acc_cov_output, b_gyr_cov, b_acc_cov;
 extern double imu_meas_acc_cov, imu_meas_omg_cov;
@@ -85,6 +87,7 @@ extern bool is_first_frame;
 extern std::vector<double> extrinT;
 extern std::vector<double> extrinR;
 extern double time_diff_lidar_to_imu;
+extern bool allow_zero_lidar_duration;
 extern double lidar_time_inte, first_imu_time;
 extern int cut_frame_num, orig_odom_freq;
 extern double online_refine_time;  //unit: s

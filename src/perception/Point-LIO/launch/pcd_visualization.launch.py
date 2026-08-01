@@ -18,14 +18,9 @@ def generate_launch_description():
         "pcd_file",
         default_value=PathJoinSubstitution(
             [
-                EnvironmentVariable("HOME"),
-                "venom_ws",
-                "src",
-                "venom_vnv",
-                "lio",
-                "Point-LIO",
-                "PCD",
-                "scans.pcd",
+                EnvironmentVariable("SIM_EGO_ROOT", default_value="/home/wu/sim-ego"),
+                "scenarios",
+                "pointlio_sitl_map.pcd",
             ]
         ),
         description="Absolute path to the PCD file to visualize",
