@@ -62,7 +62,7 @@ ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
-  require_rangefinder_height:=true \
+  require_rangefinder_height:=false \
   output_enabled:=false \
   auto_arm:=false \
   start_with_waypoints:=true
