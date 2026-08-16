@@ -410,6 +410,8 @@ void Apply2DConstraintToCurrentState()
 template<typename FilterT>
 bool UpdateLidarWithInnovationGate(FilterT & filter, bool & rejected)
 {
+  // 这是更新后的工程门限，不是基于 H/P 特征值的退化检测。若单次点组校正跳变过大，
+  // 回滚到该点组更新前的状态和协方差，并禁止整帧进入局部地图。
   rejected = false;
   last_effective_feat_num = 0;
   const auto predicted_state = filter.get_x();
@@ -1135,13 +1137,14 @@ int main(int argc, char ** argv)
       if (!use_imu_as_input) {
         bool imu_upda_cov = false;
         effct_feat_num = 0;
-        /**** point by point update ****/
+        /**** 默认模式：omega/acc 是状态，IMU 作为 6 维观测；随后按点时间组做 LiDAR 更新。 ****/
         if (!time_seq.empty()) {
           double pcl_beg_time = Measures.lidar_beg_time;
           idx = -1;
           for (k = 0; k < time_seq.size(); k++) {
             PointType & point_body = feats_down_body->points[idx + time_seq[k]];
 
+            // curvature 是点相对帧起点的毫秒时间，决定本组状态传播和残差线性化时刻。
             time_current = point_body.curvature / 1000.0 + pcl_beg_time;
 
             if (is_first_frame) {
@@ -1186,7 +1189,7 @@ int main(int argc, char ** argv)
                 acc_avr << imu_next.linear_acceleration.x, imu_next.linear_acceleration.y,
                   imu_next.linear_acceleration.z;
 
-                /*** covariance update ***/
+                /*** 先传播到每个已到达的 IMU 时刻，再用该 IMU 样本更新 omega/acc/bias。 ***/
                 double dt = get_time_sec(imu_next.header.stamp) - time_predict_last_const;
                 kf_output.predict(dt, Q_output, input_in, true, false);
                 Apply2DConstraint(kf_output.x_);
@@ -1243,6 +1246,7 @@ int main(int argc, char ** argv)
             }
             bool update_rejected = false;
             lidar_update_attempts++;
+            // h_model_output() 只使用当前同时间戳点组；没有有效平面时保留传播状态继续下一组。
             const bool update_succeeded =
               UpdateLidarWithInnovationGate(kf_output, update_rejected);
             max_effective_features = std::max(max_effective_features, last_effective_feat_num);
@@ -1361,6 +1365,7 @@ int main(int argc, char ** argv)
       } else {
         bool imu_prop_cov = false;
         effct_feat_num = 0;
+        // IMU-as-input 模式：用上一 IMU 样本作零阶保持，积分到 IMU/点时刻；不再执行 6 维 IMU 观测更新。
         if (!time_seq.empty()) {
           double pcl_beg_time = Measures.lidar_beg_time;
           idx = -1;
@@ -1557,6 +1562,8 @@ int main(int argc, char ** argv)
           pointBodyToWorld(&feats_down_body->points[i], &feats_down_world->points[i]);
         }
       }
+      // 没有任何有效点面约束或触发跳变门限时，仍发布传播里程计，但不把该帧写入地图，
+      // 防止错误位姿下的点反过来污染后续最近邻和平面拟合。
       const bool lidar_frame_constrained = lidar_update_succeeded && !lidar_frame_rejected;
       if (!lidar_frame_constrained) {
         RCLCPP_WARN_THROTTLE(

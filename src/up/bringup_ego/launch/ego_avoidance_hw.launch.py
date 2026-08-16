@@ -9,8 +9,9 @@ EGO 自主避障硬件启动文件。
   5. EGO 规划器 + 轨迹服务器
   6. ego_px4_bridge：EGO → PX4 Offboard 控制桥接
   7. startup_goal：启动时发布初始目标
-  8. ego_hw_monitor：硬件管线诊断
-  9. PX4 DDS 监控 + 控制看门狗 + 位置对比
+  8. auto_land_after_goal：到点稳定后请求降落，确认落地后关闭心跳
+  9. ego_hw_monitor：硬件管线诊断
+  10. PX4 DDS 监控 + 控制看门狗 + 位置对比
 
 完整数据流：
   Livox /livox/lidar + /livox/imu
@@ -247,6 +248,8 @@ def generate_launch_description():
                 "takeoff_speed_xy_tol": LaunchConfiguration("takeoff_speed_xy_tol"),
                 "takeoff_speed_z_tol": LaunchConfiguration("takeoff_speed_z_tol"),
                 "takeoff_stable_sec": LaunchConfiguration("takeoff_stable_sec"),
+                "landing_requested_topic": "/ego/landing_requested",
+                "landing_complete_topic": "/ego/landing_complete",
                 "reference_capture_delay_sec": LaunchConfiguration(
                     "reference_capture_delay_sec"
                 ),
@@ -292,6 +295,47 @@ def generate_launch_description():
                 ),
                 "wait_for_takeoff_ready": LaunchConfiguration("takeoff_before_ego"),
                 "takeoff_ready_topic": "/ego/takeoff_ready",
+            }
+        ],
+    )
+
+    # ========== Node 9: 到点后自动降落 ==========
+    # 该节点不发布 TrajectorySetpoint，不参与 EGO -> PX4 的连续轨迹控制。
+    # 它订阅 startup_goal 使用的同一个目标话题，并用 /ego/odom_fused 中
+    # base 机体中心的位置和速度判断是否稳定到点，然后只发送 PX4 NAV_LAND。
+    #
+    # 两阶段握手：
+    #   landing_requested=true：PX4 正在下降，桥接仍维持心跳但禁止重进 Offboard；
+    #   landing_complete=true ：PX4 landed=true，桥接才彻底停止心跳和 setpoint。
+    auto_land = Node(
+        package="hx_bringup_ego",
+        executable="auto_land_after_goal.py",
+        name="ego_auto_land_after_goal",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("auto_land_after_goal")),
+        parameters=[
+            {
+                "goal_topic": "/move_base_simple/goal",
+                "odom_topic": planner_odom_topic,
+                "vehicle_status_topic": "/fmu/out/vehicle_status",
+                "vehicle_land_detected_topic": "/fmu/out/vehicle_land_detected",
+                "takeoff_ready_topic": "/ego/takeoff_ready",
+                "landing_requested_topic": "/ego/landing_requested",
+                "landing_complete_topic": "/ego/landing_complete",
+                "output_enabled": LaunchConfiguration("output_enabled"),
+                "hardware_confirmation": LaunchConfiguration("hardware_confirmation"),
+                "require_takeoff_ready": LaunchConfiguration("takeoff_before_ego"),
+                "goal_xy_tolerance": LaunchConfiguration("auto_land_xy_tolerance"),
+                "goal_z_tolerance": LaunchConfiguration("auto_land_z_tolerance"),
+                "goal_speed_xy_tolerance": LaunchConfiguration(
+                    "auto_land_speed_xy_tolerance"
+                ),
+                "goal_speed_z_tolerance": LaunchConfiguration(
+                    "auto_land_speed_z_tolerance"
+                ),
+                "goal_stable_sec": LaunchConfiguration("auto_land_stable_sec"),
+                "odom_timeout_sec": 0.30,
+                "land_command_period_sec": 1.0,
             }
         ],
     )
@@ -359,7 +403,7 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("use_livox_driver", default_value="true"),
+            DeclareLaunchArgument("use_livox_driver", default_value="false"),
             DeclareLaunchArgument("use_pointlio", default_value="true"),
             DeclareLaunchArgument("use_pointlio_px4_visual_odom", default_value="true"),
             DeclareLaunchArgument(
@@ -385,6 +429,20 @@ def generate_launch_description():
             DeclareLaunchArgument("goal_yaw", default_value="0.0"),
             DeclareLaunchArgument("start_with_goal", default_value="true"),
             DeclareLaunchArgument("startup_goal_delay_sec", default_value="3.0"),
+            # 默认关闭自动降落，保持原来已实机验证的启动行为。只有显式传入
+            # auto_land_after_goal:=true 才创建上面的 auto_land 节点。
+            DeclareLaunchArgument(
+                "auto_land_after_goal",
+                default_value="false",
+                description="Automatically request PX4 landing after the final EGO goal is stable",
+            ),
+            # 到点不是只看距离：XY/Z 位置误差和水平/垂直速度必须同时满足，
+            # 并连续保持 auto_land_stable_sec，才能过滤高速穿越目标和定位抖动。
+            DeclareLaunchArgument("auto_land_xy_tolerance", default_value="0.25"),
+            DeclareLaunchArgument("auto_land_z_tolerance", default_value="0.15"),
+            DeclareLaunchArgument("auto_land_speed_xy_tolerance", default_value="0.15"),
+            DeclareLaunchArgument("auto_land_speed_z_tolerance", default_value="0.15"),
+            DeclareLaunchArgument("auto_land_stable_sec", default_value="1.0"),
             DeclareLaunchArgument("takeoff_before_ego", default_value="true"),
             DeclareLaunchArgument("takeoff_altitude", default_value="0.30"),
             DeclareLaunchArgument("takeoff_vertical_speed", default_value="0.20"),
@@ -423,6 +481,7 @@ def generate_launch_description():
             trajectory_server,
             px4_bridge,
             startup_goal,
+            auto_land,
             hardware_monitor,
             px4_dds_monitor,
             px4_control_watchdog,

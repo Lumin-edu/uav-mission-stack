@@ -75,6 +75,8 @@ void ImuProcess::IMU_init(const MeasureGroup & meas, int & N)
     mean_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
   }
 
+  // 用在线均值累计静止段。当前实现只用 mean_acc 求初始姿态；mean_gyr 虽被统计，
+  // 但没有写入滤波器 bg，初始零偏仍依赖后续 IMU/LiDAR 观测收敛。
   for (const auto & imu : meas.imu) {
     const auto & imu_acc = imu->linear_acceleration;
     const auto & gyr_acc = imu->angular_velocity;
@@ -90,6 +92,8 @@ void ImuProcess::IMU_init(const MeasureGroup & meas, int & N)
 
 void ImuProcess::Process(const MeasureGroup & meas, PointCloudXYZI::Ptr & cur_pcl_un_)
 {
+  // 这里不做传统的整帧去畸变。点云原样返回，运动补偿由 laserMapping.cpp 中
+  // “按点时间传播状态并立即配准”的 Point-LIO 更新方式隐式完成。
   if (imu_en) {
     if (meas.imu.empty()) return;
 

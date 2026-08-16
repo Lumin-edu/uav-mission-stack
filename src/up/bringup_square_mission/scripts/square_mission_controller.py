@@ -13,9 +13,10 @@ from typing import Optional
 
 import rclpy
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand
-from px4_msgs.msg import VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import VehicleLandDetected, VehicleLocalPosition, VehicleStatus
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,12 @@ class SquareMissionController(Node):
     状态流转：
       WAITING_REFERENCE → 等待获取 PX4 本地位置作为参考原点
       MISSION           → 执行正方形航点飞行任务
-      COMPLETED         → 任务完成，保持在降落后的 setpoint
+      LANDING           → 交给 PX4 自动降落并等待落地检测
+      COMPLETED         → 已落地并反锁，不再发送 Offboard/解锁命令
     """
     STATE_WAITING_REFERENCE = "waiting_reference"
     STATE_MISSION = "mission"
+    STATE_LANDING = "landing"
     STATE_COMPLETED = "completed"
 
     def __init__(self) -> None:
@@ -84,6 +87,10 @@ class SquareMissionController(Node):
         self.vehicle_status_topic = self.param_string(
             "vehicle_status_topic", "/fmu/out/vehicle_status"
         )
+        self.vehicle_land_detected_topic = self.param_string(
+            "vehicle_land_detected_topic", "/fmu/out/vehicle_land_detected"
+        )
+        self.external_health_topic = self.param_string("external_health_topic", "")
 
         self.validate_parameters()
 
@@ -119,6 +126,20 @@ class SquareMissionController(Node):
             self.vehicle_status_callback,
             qos,
         )
+        self.create_subscription(
+            VehicleLandDetected,
+            self.vehicle_land_detected_topic,
+            self.vehicle_land_detected_callback,
+            qos,
+        )
+        self.external_health_ok = not bool(self.external_health_topic)
+        if self.external_health_topic:
+            self.create_subscription(
+                Bool,
+                self.external_health_topic,
+                self.external_health_callback,
+                qos,
+            )
 
         # ---------- 状态机初始化为等待参考位置 ----------
         self.state = self.STATE_WAITING_REFERENCE
@@ -129,10 +150,15 @@ class SquareMissionController(Node):
         self.offboard_setpoint_counter = 0    # Offboard 预流计数器
         self.last_arm_request_us = 0
         self.last_offboard_request_us = 0
+        self.last_land_request_us = 0
+        self.last_disarm_request_us = 0
         self.waiting_for_reference_logged = False
         self.waiting_for_manual_arm_logged = False
         self.waiting_for_offboard_logged = False
         self.completion_logged = False
+        self.external_health_lost_logged = False
+        self.vehicle_landed: Optional[bool] = None
+        self.landing_detected_since_sec: Optional[float] = None
 
         # ---------- 任务坐标数据 ----------
         self.start_local: Optional[list[float]] = None       # 起始 PX4 位置（NED）
@@ -282,8 +308,9 @@ class SquareMissionController(Node):
         # 构建任务航点并转换到 NED
         self.task_waypoints = self.build_task_waypoints()
         self.local_waypoints = [self.task_waypoint_to_local(wp) for wp in self.task_waypoints]
-        # 初始化指令位置为第一个航点
-        self.commanded_local = list(self.local_waypoints[0])
+        # Start at the captured position so the configured vertical speed also
+        # limits takeoff instead of applying a full-altitude step on arm.
+        self.commanded_local = list(self.start_local)
         self.reference_captured = True
         self.waiting_for_reference_logged = False
         self.transition_to(self.STATE_MISSION)
@@ -309,6 +336,22 @@ class SquareMissionController(Node):
             self.waiting_for_manual_arm_logged = False
         else:
             self.waiting_for_offboard_logged = False
+
+    def external_health_callback(self, msg: Bool) -> None:
+        self.external_health_ok = bool(msg.data)
+        if self.external_health_ok:
+            self.external_health_lost_logged = False
+
+    def vehicle_land_detected_callback(self, msg: VehicleLandDetected) -> None:
+        was_landed = self.vehicle_landed
+        self.vehicle_landed = bool(msg.landed)
+        if self.vehicle_landed:
+            if was_landed is not True:
+                self.landing_detected_since_sec = self.now_sec()
+                if self.state == self.STATE_LANDING:
+                    self.get_logger().info("PX4 reports landed; waiting briefly before disarm.")
+        else:
+            self.landing_detected_since_sec = None
 
     def task_waypoint_to_local(self, waypoint: SquareWaypoint) -> list[float]:
         """
@@ -394,13 +437,23 @@ class SquareMissionController(Node):
             f"Waypoint complete: {old.label}. Advancing to {new.label}."
         )
         self.log_active_waypoint()
+        if self.waypoint_index == len(self.task_waypoints) - 1:
+            self.start_landing()
+
+    def start_landing(self) -> None:
+        self.transition_to(self.STATE_LANDING)
+        self.last_land_request_us = 0
+        self.last_disarm_request_us = 0
+        self.get_logger().info(
+            "Square path complete at origin; handing descent to PX4 NAV_LAND."
+        )
 
     def complete_mission(self) -> None:
         self.transition_to(self.STATE_COMPLETED)
         if not self.completion_logged:
             self.completion_logged = True
             self.get_logger().info(
-                "Square mission completed. Holding final origin landing setpoint."
+                "Square mission completed: PX4 is landed and disarmed."
             )
 
     def hold_seconds_for_active_waypoint(self) -> float:
@@ -459,11 +512,14 @@ class SquareMissionController(Node):
 
         流程：
           1. 先预发一定数量的 OffboardControlMode + TrajectorySetpoint 数据流（prestream）
-          2. 若 auto_arm=false，等待遥控器手动解锁
-          3. 若 auto_arm=true，自动发送解锁指令
-          4. 解锁后发送 Offboard 模式切换指令
+          2. 请求进入 Offboard 模式
+          3. 若 auto_arm=false，等待遥控器手动解锁
+          4. 若 auto_arm=true，自动发送解锁指令
         """
-        if not self.reference_captured:
+        if not self.reference_captured or self.state in (
+            self.STATE_LANDING,
+            self.STATE_COMPLETED,
+        ):
             return
 
         # 预流阶段：持续发 setpoint 数据给 PX4，作为 Offboard 模式的"心跳"
@@ -472,6 +528,19 @@ class SquareMissionController(Node):
             return
 
         now_us = self.now_us()
+        if not self.offboard_enabled:
+            if now_us - self.last_offboard_request_us >= 1_000_000:
+                self.publish_vehicle_command(
+                    VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
+                )
+                self.last_offboard_request_us = now_us
+                self.waiting_for_offboard_logged = False
+                self.get_logger().info("Offboard mode command sent.")
+            elif not self.waiting_for_offboard_logged:
+                self.waiting_for_offboard_logged = True
+                self.get_logger().info("Waiting for PX4 to enter Offboard mode.")
+            return
+
         if not self.armed:
             if self.auto_arm and now_us - self.last_arm_request_us >= 1_000_000:
                 self.publish_vehicle_command(
@@ -482,21 +551,38 @@ class SquareMissionController(Node):
             elif not self.auto_arm and not self.waiting_for_manual_arm_logged:
                 self.waiting_for_manual_arm_logged = True
                 self.get_logger().info(
-                    "Waiting for manual arm from RC before requesting Offboard mode."
+                    "Waiting for manual arm from RC while holding Offboard mode."
                 )
+
+    def handle_landing(self) -> None:
+        now_us = self.now_us()
+        if not self.armed and self.last_land_request_us > 0:
+            self.complete_mission()
             return
 
-        # 已解锁，请求进入 Offboard 模式
-        if not self.offboard_enabled and now_us - self.last_offboard_request_us >= 1_000_000:
-            self.publish_vehicle_command(
-                VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
+        if self.vehicle_landed is not True:
+            auto_land_active = (
+                self.vehicle_status.nav_state
+                == VehicleStatus.NAVIGATION_STATE_AUTO_LAND
             )
-            self.last_offboard_request_us = now_us
-            self.waiting_for_offboard_logged = False
-            self.get_logger().info("Offboard mode command sent.")
-        elif not self.offboard_enabled and not self.waiting_for_offboard_logged:
-            self.waiting_for_offboard_logged = True
-            self.get_logger().info("Waiting for PX4 to enter Offboard mode.")
+            if not auto_land_active and now_us - self.last_land_request_us >= 1_000_000:
+                self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
+                self.last_land_request_us = now_us
+                self.get_logger().info("PX4 NAV_LAND command sent.")
+            return
+
+        if self.armed:
+            detected_at = self.landing_detected_since_sec
+            settled = detected_at is not None and self.now_sec() - detected_at >= 0.5
+            if settled and now_us - self.last_disarm_request_us >= 1_000_000:
+                self.publish_vehicle_command(
+                    VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
+                )
+                self.last_disarm_request_us = now_us
+                self.get_logger().info("Landed; PX4 disarm command sent.")
+            return
+
+        self.complete_mission()
 
     def move_towards_xy_z(self, current: list[float], target: list[float]) -> list[float]:
         """
@@ -575,12 +661,10 @@ class SquareMissionController(Node):
         if not self.reference_captured or self.commanded_local is None:
             return
 
-        if self.state == self.STATE_COMPLETED:
-            # 任务完成后持续发射最终航点 setpoint
-            self.commanded_local = list(self.local_waypoints[-1])
+        if self.state in (self.STATE_LANDING, self.STATE_COMPLETED):
             return
 
-        if not self.offboard_enabled:
+        if not self.offboard_enabled or not self.armed:
             return
 
         target = self.active_target()
@@ -615,6 +699,21 @@ class SquareMissionController(Node):
           4. 发布 TrajectorySetpoint
           5. 处理 Offboard 模式进入序列（解锁、切换模式）
         """
+        if self.state == self.STATE_COMPLETED:
+            return
+
+        if self.state == self.STATE_LANDING:
+            self.handle_landing()
+            return
+
+        if not self.external_health_ok:
+            if not self.external_health_lost_logged:
+                self.external_health_lost_logged = True
+                self.get_logger().error(
+                    "External localization is unhealthy; suppressing Offboard heartbeat."
+                )
+            return
+
         # 1. 发布 Offboard 控制模式（必须持续发布，否则 PX4 会退出 Offboard）
         self.publish_offboard_control_mode()
 

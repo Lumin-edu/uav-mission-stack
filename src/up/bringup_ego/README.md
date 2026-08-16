@@ -89,6 +89,25 @@ does it publish the startup goal and allow EGO trajectory commands to take
 control. If an EGO command is temporarily unavailable, the bridge continuously
 holds the last safe PX4 position.
 
+Optional `auto_land_after_goal:=true` enables `auto_land_after_goal.py`. It
+uses the same `/move_base_simple/goal` and `/ego/odom_fused` base-center pose,
+waits for position and velocity to remain within tolerance, then sends
+`VEHICLE_CMD_NAV_LAND`:
+
+```text
+goal stable -> /ego/landing_requested -> PX4 NAV_LAND
+PX4 landed=true -> /ego/landing_complete -> stop Offboard heartbeat/setpoints
+```
+
+`VEHICLE_CMD_NAV_LAND` 在当前 PX4 版本中表示“当前位置降落”。因此命令发送
+时飞机已经稳定在 EGO 目标点，PX4 会把该时刻的当前位置作为降落点，保持目标
+点的 XY 下降；它不会执行 `NAV_RETURN_TO_LAUNCH`，也不会自动回到起飞点。
+
+During descent the bridge keeps its heartbeat and blocks Offboard re-entry. It
+stops publishing `/fmu/in/offboard_control_mode` and
+`/fmu/in/trajectory_setpoint` only after PX4 reports
+`/fmu/out/vehicle_land_detected.landed=true`.
+
 Startup task parameters use the validated task frame:
 
 ```text
@@ -190,6 +209,7 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
   goal_x:=0.0 goal_y:=2.0 goal_z:=0.40 \
   max_velocity:=0.3 max_acceleration:=0.5 \
   control_mode:=position \
+  auto_land_after_goal:=true \
   output_enabled:=true \
   hardware_confirmation:=ENABLE_PX4_OUTPUT \
   auto_arm:=false \
@@ -199,6 +219,10 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
 `takeoff_altitude` is relative to the captured takeoff origin. `goal_x`,
 `goal_y`, and `goal_z` are EGO task-frame coordinates (`x=right`, `y=forward`,
 `z=up`) and are not published until takeoff is stable.
+
+Automatic landing is disabled by default. Initial thresholds are 0.25 m XY,
+0.15 m Z, 0.15 m/s horizontal/vertical speed, stable for 1.0 s. Verify PX4
+landing detection with propellers removed before enabling it on the aircraft.
 
 With `start_with_goal:=false`, set each target in RViz using `2D Goal Pose`.
 For a fixed altitude, the launch value `goal_z` is used when the clicked pose

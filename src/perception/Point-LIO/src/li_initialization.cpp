@@ -288,6 +288,8 @@ void imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr & msg_in)
   sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
   // publish_count ++;
 
+  // 将 IMU 时间轴平移到 LiDAR 时间轴。三个量都按“从原始 IMU 时间中减去”处理；
+  // 当前自动估计代码被禁用，实际主要由 common.time_diff_lidar_to_imu 配置固定偏移。
   msg->header.stamp = get_ros_time(
     get_time_sec(msg_in->header.stamp) - timediff_imu_wrt_lidar - time_diff_lidar_to_imu -
     time_lag_IMU_wtr_lidar);
@@ -382,6 +384,7 @@ bool sync_packages(MeasureGroup & meas)
       lidar_pushed = true;
     }
 
+    // 必须等 IMU 覆盖到点云末端，点级传播才不会越过当前可用惯导数据。
     if (!lose_lid && (last_timestamp_imu < lidar_end_time)) {
       warn_imu_wait_if_needed(lidar_end_time);
       return false;
@@ -396,6 +399,8 @@ bool sync_packages(MeasureGroup & meas)
 
     if (!lose_lid && !imu_pushed) {
       /*** push imu data, and pop from imu buffer ***/
+      // 初始化阶段把帧末之前的 IMU 交给 ImuProcess 统计均值；初始化完成后不在此消费，
+      // 而由 laserMapping 的点级循环直接从全局 imu_deque 按时间推进。
       if (p_imu->imu_need_init_) {
         double imu_time = get_time_sec(imu_deque.front()->header.stamp);
         imu_next = *(imu_deque.front());

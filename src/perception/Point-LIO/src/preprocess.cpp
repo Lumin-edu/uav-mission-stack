@@ -110,7 +110,7 @@ void Preprocess::process_cut_frame_livox(
         pl_full[i].y = msg->points[i].y;
         pl_full[i].z = msg->points[i].z;
         pl_full[i].intensity = msg->points[i].reflectivity;
-        //use curvature as time of each laser points，unit: ms
+        // PointType 没有独立时间字段，这里约定 curvature 保存点相对当前帧起点的时间，单位 ms。
         pl_full[i].curvature = msg->points[i].offset_time / float(1000000);
 
         double dist =

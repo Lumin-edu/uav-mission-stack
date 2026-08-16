@@ -15,6 +15,7 @@ install(FILES README.md
 
 install(PROGRAMS
   scripts/ego_px4_bridge.py
+  scripts/auto_land_after_goal.py
   scripts/ego_hw_monitor.py
   scripts/planner_altitude_fusion.py
   scripts/startup_goal.py

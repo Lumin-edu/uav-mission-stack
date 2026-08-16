@@ -123,6 +123,18 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_topic = str(
             self.declare_parameter("takeoff_ready_topic", "/ego/takeoff_ready").value
         )
+        # ========== 自动降落握手话题 ==========
+        # /ego/landing_requested=true：auto_land_after_goal 已发送 NAV_LAND。
+        #   桥接节点在下降期间仍继续发 Offboard 心跳/setpoint，避免控制输出突然中断，
+        #   但禁止 manage_px4_state() 再请求进入 Offboard，以免覆盖 PX4 AUTO_LAND。
+        # /ego/landing_complete=true：PX4 的落地检测器已经报告 landed=true。
+        #   只有到这个阶段，timer_callback() 才真正停止心跳和轨迹设定值。
+        self.landing_requested_topic = str(
+            self.declare_parameter("landing_requested_topic", "/ego/landing_requested").value
+        )
+        self.landing_complete_topic = str(
+            self.declare_parameter("landing_complete_topic", "/ego/landing_complete").value
+        )
         self.localization_health_topic = str(
             self.declare_parameter("localization_health_topic", "").value
         )
@@ -244,6 +256,9 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_pub = self.create_publisher(
             Bool, self.takeoff_ready_topic, ready_qos
         )
+        # 自动降落两阶段锁存状态：请求阶段与落地完成阶段必须严格分开。
+        self.landing_requested = False
+        self.landing_complete = False
         self.localization_health_required = bool(self.localization_health_topic)
         self.localization_healthy = not self.localization_health_required
         if self.localization_health_required:
@@ -253,6 +268,18 @@ class EgoPx4Bridge(Node):
                 self.localization_health_callback,
                 ready_qos,
             )
+        self.create_subscription(
+            Bool,
+            self.landing_requested_topic,
+            self.landing_requested_callback,
+            ready_qos,
+        )
+        self.create_subscription(
+            Bool,
+            self.landing_complete_topic,
+            self.landing_complete_callback,
+            ready_qos,
+        )
 
         # ========== 订阅话题 ==========
         self.create_subscription(
@@ -326,6 +353,22 @@ class EgoPx4Bridge(Node):
         if was_healthy and not self.localization_healthy:
             self.get_logger().error(
                 "Planner altitude fusion is unhealthy; new EGO trajectory execution is inhibited."
+            )
+
+    def landing_requested_callback(self, msg: Bool) -> None:
+        """锁存“已请求降落”，阻止正常控制状态机重新夺回 Offboard。"""
+        if msg.data and not self.landing_requested:
+            self.landing_requested = True
+            self.get_logger().warn(
+                "Auto-land requested; keeping the heartbeat during descent but blocking Offboard re-entry."
+            )
+
+    def landing_complete_callback(self, msg: Bool) -> None:
+        """锁存 PX4 落地确认；主循环随后停止全部 Offboard 输出。"""
+        if msg.data and not self.landing_complete:
+            self.landing_complete = True
+            self.get_logger().warn(
+                "PX4 landing confirmed; stopping Offboard heartbeat and trajectory setpoints."
             )
 
     def ego_odom_callback(self, msg: Odometry) -> None:
@@ -755,6 +798,11 @@ class EgoPx4Bridge(Node):
             or self.setpoint_cycles < self.offboard_prestream_cycles
         ):
             return
+        if self.landing_requested or self.landing_complete:
+            # 关键控制权保护：NAV_LAND 发出后，PX4 会从 Offboard 切到 AUTO_LAND。
+            # 此时不能让原来的“解锁 -> 请求 Offboard”逻辑再次把 PX4 拉回 Offboard，
+            # 否则会中断 PX4 自己的下降状态机。
+            return
         now_us = self.now_us()
         armed = self.latest_vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
         offboard = (
@@ -790,6 +838,14 @@ class EgoPx4Bridge(Node):
         """
         # 步骤1：硬件安全门检查
         if not self.output_permitted:
+            return
+        if self.landing_complete:
+            # ========== 真正关闭心跳的位置 ==========
+            # auto_land_after_goal 只有在 PX4 发布 landed=true 后才会发 complete=true。
+            # 因此下降过程中不会执行到这里；确认接地后直接 return，后面的
+            # publish_offboard_mode() 和 setpoint_pub.publish() 均不再执行。
+            # 关闭的是 ROS 侧 OffboardControlMode/TrajectorySetpoint 发布，不是飞行中
+            # 强制断开通信，PX4 已经完成落地后再停止，时序是安全的。
             return
         if not self.localization_healthy:
             if self.reference_world is not None:

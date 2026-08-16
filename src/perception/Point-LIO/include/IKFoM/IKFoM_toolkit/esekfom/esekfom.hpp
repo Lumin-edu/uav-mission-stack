@@ -144,6 +144,8 @@ public:
   void predict(
     double & dt, processnoisecovariance & Q, const input & i_in, bool predict_state, bool prop_cov)
   {
+    // 名义状态和协方差可分开推进。Point-LIO 利用这一点在每个点时刻推进状态，
+    // 同时按 IMU 频率（或点更新频率）累计协方差，避免对同一 dt 重复积分。
     if (predict_state) {
       flatted_state f_ = f(x_, i_in);
       x_.oplus(f_, dt);
@@ -195,6 +197,8 @@ public:
 
   bool update_iterated_dyn_share_modified()
   {
+    // 名称沿用 IKFoM 的迭代更新接口，但当前初始化将 maximum_iter 设为 1，
+    // 因而每个点时间组只线性化并更新一次。
     dyn_share_modified<scalar_type> dyn_share;
     state x_propagated = x_;
     int dof_Measurement;
@@ -236,6 +240,8 @@ public:
         P_inv = P_inv.inverse();
         K_ = P_inv.template block<n, 12>(0, 0) * h_x.transpose() * m_noise;
       }
+      // h_x 只显式包含前 12 维几何状态；PHT 使用完整 P，使速度、bias、重力等
+      // 仍可通过与几何状态的互协方差获得修正。
       Matrix<scalar_type, n, 1> dx_ =
         K_ * z;  // - h) + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new;
       // state x_before = x_;
@@ -250,6 +256,7 @@ public:
 
   void update_iterated_dyn_share_IMU()
   {
+    // H_imu 的每一轴只在 omega/acc 与对应 bias 上为 1，因此直接由 P 的相关列构造 P H^T。
     dyn_share_modified<scalar_type> dyn_share;
     for (int i = 0; i < maximum_iter; i++) {
       dyn_share.valid = true;

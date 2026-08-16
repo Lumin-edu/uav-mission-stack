@@ -21,10 +21,15 @@ typedef MTK::S2<double, 98090, 10000, 1> S2;
 typedef MTK::vect<1, double> vect1;
 typedef MTK::vect<2, double> vect2;
 
+// IMU-as-input 模式的 24 维误差状态，误差索引依次为：
+// p[0:3], R[3:6], R_LI[6:9], t_LI[9:12], v[12:15], bg[15:18], ba[18:21], g[21:24]。
+// SO3 在流形上保存，协方差中的姿态块仍以 3 维李代数扰动表示。
 MTK_BUILD_MANIFOLD(
   state_input, ((vect3, pos))((SO3, rot))((SO3, offset_R_L_I))((vect3, offset_T_L_I))((vect3, vel))(
                  (vect3, bg))((vect3, ba))((vect3, gravity)));
 
+// IMU-as-output（默认）模式的 30 维误差状态。在前 15 维之后显式增加
+// omega[15:18], acc[18:21]，再接 g[21:24], bg[24:27], ba[27:30]；IMU 被当作观测更新 omega/acc 与 bias。
 MTK_BUILD_MANIFOLD(
   state_output,
   ((vect3, pos))((SO3, rot))((SO3, offset_R_L_I))((vect3, offset_T_L_I))((vect3, vel))(
@@ -82,6 +87,8 @@ const M3F Eye3f(M3F::Identity());
 const V3D Zero3d(0, 0, 0);
 const V3F Zero3f(0, 0, 0);
 
+// 一帧点云及其同步数据。点的 curvature 保存“相对帧起点的时间（ms）”，
+// lidar_beg_time/lidar_last_time 和 IMU header 则统一使用秒。
 struct MeasureGroup  // Lidar data and imu dates for the curent process
 {
   MeasureGroup()
@@ -120,6 +127,8 @@ std::vector<int> time_compressing(const PointCloudXYZI::Ptr & point_cloud)
   std::vector<int> time_seq;
   // time_seq.clear();
   time_seq.reserve(points_size);
+  // 输入点已按 curvature 排序；将相同时间戳的点压成一组。主循环会对每组执行一次
+  // “传播到该时间 -> 点面更新”，严格递增时间戳时退化为逐点更新。
   for (int i = 0; i < points_size - 1; i++) {
     j++;
     if (point_cloud->points[i + 1].curvature > point_cloud->points[i].curvature) {

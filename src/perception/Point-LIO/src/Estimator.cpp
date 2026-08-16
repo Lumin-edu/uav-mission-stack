@@ -54,6 +54,8 @@ Eigen::Matrix<double, 30, 30> process_noise_cov_output()
 
 Eigen::Matrix<double, 24, 1> get_f_input(state_input & s, const input_ikfom & in)
 {
+  // 连续时间模型：p_dot=v, R_dot=R*(gyro-bg)^, v_dot=R*(acc-ba)+g；
+  // 外参、bias 和重力的名义值在传播中保持常量，由过程噪声和观测更新修正。
   Eigen::Matrix<double, 24, 1> res = Eigen::Matrix<double, 24, 1>::Zero();
   vect3 omega;
   in.gyro.boxminus(omega, s.bg);
@@ -68,6 +70,8 @@ Eigen::Matrix<double, 24, 1> get_f_input(state_input & s, const input_ikfom & in
 
 Eigen::Matrix<double, 30, 1> get_f_output(state_output & s, const input_ikfom & in)
 {
+  // 默认模式不直接把本次 IMU 读数送入运动方程，而是传播状态内的 omega/acc；
+  // 随后 h_model_IMU_output() 再用 IMU 读数校正 omega/acc 与对应 bias。
   Eigen::Matrix<double, 30, 1> res = Eigen::Matrix<double, 30, 1>::Zero();
   vect3 a_inertial = s.rot * s.acc;  // .normalized()
   for (int i = 0; i < 3; i++) {
@@ -80,6 +84,8 @@ Eigen::Matrix<double, 30, 1> get_f_output(state_output & s, const input_ikfom & 
 
 Eigen::Matrix<double, 24, 24> df_dx_input(state_input & s, const input_ikfom & in)
 {
+  // f 对误差状态的连续时间 Jacobian。这里只填写非零耦合块，IKFoM 在 predict() 中
+  // 结合 SO(3) 的右 Jacobian离散化成 F，并执行 P=F P F^T + Q dt^2。
   Eigen::Matrix<double, 24, 24> cov = Eigen::Matrix<double, 24, 24>::Zero();
   cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
   vect3 acc_;
@@ -114,6 +120,8 @@ void h_model_input(
   state_input & s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_R,
   esekfom::dyn_share_modified<double> & ekfom_data)
 {
+  // 当前时间组的 scan-to-map 观测：先在 iVox 中取 5 个近邻拟合平面，
+  // 再构造点到平面的标量残差。output 模式的 h_model_output() 与此完全同构。
   bool match_in_map = false;
   VF(4) pabcd;
   pabcd.setZero();
@@ -160,6 +168,7 @@ void h_model_input(
           // 	pabcd(2) = weight * pabcd(2);
           // 	pabcd(3) = weight * pabcd(3);
           // }
+          // 距离相关门限：残差 pd2 相对量程过大时视为错误匹配。
           if (p_norm > match_s * pd2 * pd2) {
             point_selected_surf[idx + j + 1] = true;
             normvec->points[j].x = pabcd(0);
@@ -206,6 +215,8 @@ void h_model_input(
         ekfom_data.h_x.block<1, 12>(m, 0) << norm_vec(0), norm_vec(1), norm_vec(2),
           VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
       }
+      // 平面 n^T p_w+d=0，EKF 使用创新 z=-(n^T p_w+d)。h_x 的 12 列依次对应
+      // [位置, 机体姿态, LiDAR-IMU 外参旋转, 外参平移]；其余状态通过 P 的互协方差被间接校正。
       ekfom_data.z(m) = -norm_vec(0) * feats_down_world->points[idx + j + 1].x -
                         norm_vec(1) * feats_down_world->points[idx + j + 1].y -
                         norm_vec(2) * feats_down_world->points[idx + j + 1].z -
@@ -221,6 +232,7 @@ void h_model_output(
   state_output & s, Eigen::Matrix3d cov_p, Eigen::Matrix3d cov_R,
   esekfom::dyn_share_modified<double> & ekfom_data)
 {
+  // 与 h_model_input() 相同的点面观测，仅状态总维数不同。
   bool match_in_map = false;
   VF(4) pabcd;
   pabcd.setZero();
@@ -326,12 +338,15 @@ void h_model_output(
 
 void h_model_IMU_output(state_output & s, esekfom::dyn_share_modified<double> & ekfom_data)
 {
+  // IMU 观测模型：gyro = omega + bg，acc_meas = acc + ba。
+  // acc_norm 用来把以 g 为单位的驱动读数缩放到 m/s^2。
   std::memset(ekfom_data.satu_check, false, 6);
   ekfom_data.z_IMU.block<3, 1>(0, 0) = angvel_avr - s.omg - s.bg;
   ekfom_data.z_IMU.block<3, 1>(3, 0) = acc_avr * G_m_s2 / acc_norm - s.acc - s.ba;
   ekfom_data.R_IMU << imu_meas_omg_cov, imu_meas_omg_cov, imu_meas_omg_cov, imu_meas_acc_cov,
     imu_meas_acc_cov, imu_meas_acc_cov;
   if (check_satu) {
+    // 接近量程上限的轴不参与本次更新；esekfom.hpp 会将对应 H 行置零，仅保留其测量噪声。
     if (fabs(angvel_avr(0)) >= 0.99 * satu_gyro) {
       ekfom_data.satu_check[0] = true;
       ekfom_data.z_IMU(0) = 0.0;
