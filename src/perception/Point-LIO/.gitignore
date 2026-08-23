@@ -1,8 +1,0 @@
-# Ignore all PCD files in PCD directory
-PCD/*.pcd
-PCD/*.posegraph
-PCD/*.data
-
-# Ignore Python cache files
-**/__pycache__/
-*.py[cod]

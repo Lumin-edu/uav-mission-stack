@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>bringup</name>
+  <version>0.1.0</version>
+  <description>ROS1 MID360, FAST-LIO and MAVROS fixed-point bringup.</description>
+
+  <maintainer email="dev@example.com">UAV Mission Stack</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>mavros_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>tf</depend>
+
+  <exec_depend>fast_lio</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>mavros</exec_depend>
+
+  <export />
+</package>

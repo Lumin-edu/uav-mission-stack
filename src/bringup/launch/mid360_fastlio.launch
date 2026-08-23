@@ -1,0 +1,45 @@
+<launch>
+  <arg name="lidar_config"
+       default="$(find livox_ros_driver2)/config/MID360_config.json" />
+  <arg name="bd_list" default="100000000000000" />
+  <arg name="frame_id" default="livox_frame" />
+  <arg name="publish_freq" default="10.0" />
+  <arg name="fastlio_config"
+       default="$(find bringup)/config/fastlio_mid360.yaml" />
+  <arg name="rviz" default="false" />
+
+  <!-- Livox ROS driver 2: this starts the physical MID360 only. -->
+  <param name="xfer_format" value="1" />
+  <param name="multi_topic" value="0" />
+  <param name="data_src" value="0" />
+  <param name="publish_freq" type="double" value="$(arg publish_freq)" />
+  <param name="output_data_type" value="0" />
+  <param name="cmdline_str" type="string" value="$(arg bd_list)" />
+  <param name="user_config_path" type="string" value="$(arg lidar_config)" />
+  <param name="frame_id" type="string" value="$(arg frame_id)" />
+  <param name="enable_lidar_bag" type="bool" value="false" />
+  <param name="enable_imu_bag" type="bool" value="false" />
+
+  <node pkg="livox_ros_driver2" type="livox_ros_driver2_node"
+        name="livox_lidar_publisher" required="true" output="screen"
+        args="$(arg bd_list)" />
+
+  <!-- FAST-LIO publishes nav_msgs/Odometry on /Odometry. -->
+  <rosparam command="load" file="$(arg fastlio_config)" />
+  <param name="feature_extract_enable" type="bool" value="0" />
+  <param name="point_filter_num" type="int" value="3" />
+  <param name="max_iteration" type="int" value="3" />
+  <param name="filter_size_surf" type="double" value="0.5" />
+  <param name="filter_size_map" type="double" value="0.5" />
+  <param name="cube_side_length" type="double" value="1000.0" />
+  <param name="runtime_pos_log_enable" type="bool" value="0" />
+  <param name="pcd_save/pcd_save_en" type="bool" value="false" />
+
+  <node pkg="fast_lio" type="fastlio_mapping" name="fastlio_mapping"
+        output="screen" />
+
+  <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="fastlio_rviz" output="screen"
+          args="-d $(find fast_lio)/rviz_cfg/loam_livox.rviz" />
+  </group>
+</launch>

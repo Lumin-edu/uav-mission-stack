@@ -163,6 +163,10 @@ void Lds::StoragePointData(PointFrame* frame) {
       printf("Storage point data failed, lidar type:%u, handle:%u.\n", lidar_point.lidar_type, lidar_point.handle);
       continue;
     }
+    // SDK2 data callbacks are the first reliable indication that this lidar
+    // is actively sampling.  The distributor only drains queues for sampling
+    // devices, so update the state before enqueueing the packet.
+    lidars_[index].connect_state = kConnectStateSampling;
     PushLidarData(&lidar_point, index, base_time);
   }
 }

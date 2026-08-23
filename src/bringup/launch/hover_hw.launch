@@ -1,0 +1,122 @@
+<!--
+  Standalone ROS1 fixed-point bringup. MAVROS is intentionally external.
+
+  Coordinate contract:
+    target_x/y/z: task offset in the captured vehicle frame (right/forward/up)
+    /Odometry: FAST-LIO local pose (FAST-LIO world -> base_link)
+    /bringup/visual_odom: ROS ENU PoseStamped sent to MAVROS
+    MAVROS: converts ENU to PX4 NED internally
+-->
+<launch>
+  <arg name="use_fastlio" default="true" />
+  <arg name="use_fastlio_mavros_visual_odom" default="true" />
+  <arg name="use_hover_control" default="true" />
+  <arg name="use_px4_monitor" default="false" />
+  <arg name="use_px4_control_watchdog" default="true" />
+  <arg name="use_position_compare" default="false" />
+  <arg name="use_base_link_to_base_tf" default="true" />
+
+  <arg name="lidar_config_file"
+       default="$(find livox_ros_driver2)/config/MID360_config.json" />
+  <arg name="fastlio_config_file"
+       default="$(find bringup)/config/fastlio_mid360.yaml" />
+  <arg name="bd_list" default="100000000000000" />
+  <arg name="rviz" default="false" />
+
+  <arg name="target_x" default="0.0" />
+  <arg name="target_y" default="0.0" />
+  <arg name="target_z" default="0.0" />
+  <arg name="target_yaw" default="0.0" />
+  <arg name="lock_yaw" default="true" />
+  <arg name="hover_auto_arm" default="false" />
+  <arg name="offboard_rate_hz" default="20.0" />
+  <arg name="reference_capture_delay_sec" default="3.0" />
+  <arg name="visual_odom_print_rate" default="1.0" />
+
+  <arg name="odom_topic" default="/Odometry" />
+  <arg name="vision_pose_topic" default="/mavros/vision_pose/pose" />
+  <arg name="vision_preview_topic" default="/bringup/visual_odom" />
+  <arg name="local_pose_topic" default="/mavros/local_position/pose" />
+  <arg name="setpoint_topic" default="/mavros/setpoint_position/local" />
+
+  <group if="$(arg use_fastlio)">
+    <include file="$(find bringup)/launch/mid360_fastlio.launch">
+      <arg name="lidar_config" value="$(arg lidar_config_file)" />
+      <arg name="fastlio_config" value="$(arg fastlio_config_file)" />
+      <arg name="bd_list" value="$(arg bd_list)" />
+      <arg name="rviz" value="$(arg rviz)" />
+    </include>
+  </group>
+
+  <!-- Zero-centimetre calibration retained as an explicit TF boundary. -->
+  <group if="$(arg use_base_link_to_base_tf)">
+    <node pkg="tf" type="static_transform_publisher" name="base_link_to_base_tf"
+          output="screen" args="0 0 0 0 0 0 1 base_link base 100" />
+  </group>
+
+  <group if="$(arg use_fastlio_mavros_visual_odom)">
+    <node pkg="bringup" type="fastlio_to_mavros_visual_odom.py"
+          name="fastlio_to_mavros_visual_odom" output="screen" required="true">
+      <param name="fastlio_topic" value="$(arg odom_topic)" />
+      <param name="output_topic" value="$(arg vision_pose_topic)" />
+      <param name="preview_topic" value="$(arg vision_preview_topic)" />
+      <param name="output_frame" value="map" />
+      <param name="fastlio_pose_frame" value="base_link" />
+      <param name="vehicle_frame" value="base" />
+      <param name="base_link_to_base_translation" type="yaml"
+             value="[0.0, 0.0, 0.0]" />
+      <param name="base_link_to_base_rotation_xyzw" type="yaml"
+             value="[0.0, 0.0, 0.0, 1.0]" />
+      <!-- PoseStamped is ENU; MAVROS converts it to PX4 NED. -->
+      <param name="source_to_enu_rotation" type="yaml"
+             value="[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]" />
+      <param name="publish_orientation" value="true" />
+      <param name="publish_rate_limit" value="50.0" />
+      <param name="max_source_age" value="0.5" />
+      <param name="max_position_jump" value="3.0" />
+      <param name="max_output_abs_z" value="20.0" />
+      <param name="print_rate" value="$(arg visual_odom_print_rate)" />
+    </node>
+  </group>
+
+  <group if="$(arg use_hover_control)">
+    <node pkg="bringup" type="fixed_point_hover.py" name="fixed_point_hover"
+          output="screen" required="true">
+      <param name="target_x" value="$(arg target_x)" />
+      <param name="target_y" value="$(arg target_y)" />
+      <param name="target_z" value="$(arg target_z)" />
+      <param name="target_yaw" value="$(arg target_yaw)" />
+      <param name="lock_yaw" value="$(arg lock_yaw)" />
+      <param name="auto_arm" value="$(arg hover_auto_arm)" />
+      <param name="rate" value="$(arg offboard_rate_hz)" />
+      <param name="origin_delay" value="$(arg reference_capture_delay_sec)" />
+      <param name="fastlio_topic" value="$(arg odom_topic)" />
+      <param name="local_pose_topic" value="$(arg local_pose_topic)" />
+      <param name="vision_pose_topic" value="$(arg vision_preview_topic)" />
+      <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+      <param name="vision_health_topic"
+             value="/fastlio_to_mavros_visual_odom/healthy" />
+      <param name="frame_id" value="map" />
+    </node>
+  </group>
+
+  <group if="$(arg use_px4_monitor)">
+    <node pkg="bringup" type="px4_dds_monitor.py" name="px4_dds_monitor"
+          output="screen" />
+  </group>
+  <group if="$(arg use_px4_control_watchdog)">
+    <node pkg="bringup" type="px4_control_watchdog.py"
+          name="px4_control_watchdog" output="screen">
+      <param name="control_source" value="fixed_point_hover" />
+      <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    </node>
+  </group>
+  <group if="$(arg use_position_compare)">
+    <node pkg="bringup" type="px4_fastlio_position_compare.py"
+          name="px4_fastlio_position_compare" output="screen">
+      <param name="px4_topic" value="$(arg local_pose_topic)" />
+      <param name="visual_odom_topic" value="$(arg vision_preview_topic)" />
+      <param name="print_rate" value="2.0" />
+    </node>
+  </group>
+</launch>

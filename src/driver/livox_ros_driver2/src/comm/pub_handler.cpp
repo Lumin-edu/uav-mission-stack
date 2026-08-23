@@ -454,4 +454,5 @@ void LidarPubHandler::ProcessSphericalPoint(RawPacket& pkt) {
   }
 }
 
+
 } // namespace livox_ros

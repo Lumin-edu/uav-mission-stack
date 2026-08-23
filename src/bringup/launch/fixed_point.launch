@@ -1,0 +1,10 @@
+<launch>
+  <arg name="x" default="0.0" />
+  <arg name="y" default="0.0" />
+  <arg name="z" default="0.0" />
+  <include file="$(find bringup)/launch/hover_hw.launch">
+    <arg name="target_x" value="$(arg x)" />
+    <arg name="target_y" value="$(arg y)" />
+    <arg name="target_z" value="$(arg z)" />
+  </include>
+</launch>

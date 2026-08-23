@@ -1,0 +1,18 @@
+<launch>
+  <!-- Backwards-compatible ROS1 entry point. -->
+  <arg name="x" default="0.0" />
+  <arg name="y" default="0.0" />
+  <arg name="z" default="0.0" />
+  <arg name="origin_delay" default="3.0" />
+  <arg name="rate" default="20.0" />
+  <arg name="rviz" default="false" />
+
+  <include file="$(find bringup)/launch/hover_hw.launch">
+    <arg name="target_x" value="$(arg x)" />
+    <arg name="target_y" value="$(arg y)" />
+    <arg name="target_z" value="$(arg z)" />
+    <arg name="reference_capture_delay_sec" value="$(arg origin_delay)" />
+    <arg name="offboard_rate_hz" value="$(arg rate)" />
+    <arg name="rviz" value="$(arg rviz)" />
+  </include>
+</launch>

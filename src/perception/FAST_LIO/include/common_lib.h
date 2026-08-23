@@ -5,9 +5,11 @@
 #include <Eigen/Eigen>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include <fast_lio/msg/pose6_d.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <nav_msgs/msg/odometry.hpp>
+#include <fast_lio/Pose6D.h>
+#include <sensor_msgs/Imu.h>
+#include <nav_msgs/Odometry.h>
+#include <tf/transform_broadcaster.h>
+#include <eigen_conversions/eigen_msg.h>
 
 using namespace std;
 using namespace Eigen;
@@ -31,7 +33,7 @@ using namespace Eigen;
 #define STD_VEC_FROM_EIGEN(mat)  vector<decltype(mat)::Scalar> (mat.data(), mat.data() + mat.rows() * mat.cols())
 #define DEBUG_FILE_DIR(name)     (string(string(ROOT_DIR) + "Log/"+ name))
 
-typedef fast_lio::msg::Pose6D Pose6D;
+typedef fast_lio::Pose6D Pose6D;
 typedef pcl::PointXYZINormal PointType;
 typedef pcl::PointCloud<PointType> PointCloudXYZI;
 typedef vector<PointType, Eigen::aligned_allocator<PointType>>  PointVector;
@@ -50,8 +52,7 @@ M3F Eye3f(M3F::Identity());
 V3D Zero3d(0, 0, 0);
 V3F Zero3f(0, 0, 0);
 
-// 一次滤波更新所需的完整测量包：一帧 LiDAR，以及覆盖该帧扫描结束时刻的 IMU 序列。
-struct MeasureGroup
+struct MeasureGroup     // Lidar data and imu dates for the curent process
 {
     MeasureGroup()
     {
@@ -61,7 +62,7 @@ struct MeasureGroup
     double lidar_beg_time;
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
-    deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
+    deque<sensor_msgs::Imu::ConstPtr> imu;
 };
 
 struct StatesGroup
@@ -181,11 +182,13 @@ auto set_pose6d(const double t, const Matrix<T, 3, 1> &a, const Matrix<T, 3, 1> 
     return move(rot_kp);
 }
 
-/*
- * 用邻域点最小二乘拟合平面：Ax + By + Cz + D = 0。
- * 固定 D=1 后求 [A, B, C]^T，再归一化得到单位法向量；只有所有邻域点到
- * 拟合平面的距离都小于 threshold 才接受。h_share_model() 用它构造点到平面残差。
- */
+/* comment
+plane equation: Ax + By + Cz + D = 0
+convert to: A/D*x + B/D*y + C/D*z = -1
+solve: A0*x0 = b0
+where A0_i = [x_i, y_i, z_i], x0 = [A/D, B/D, C/D]^T, b0 = [-1, ..., -1]^T
+normvec:  normalized x0
+*/
 template<typename T>
 bool esti_normvector(Matrix<T, 3, 1> &normvec, const PointVector &point, const T &threshold, const int &point_num)
 {
@@ -235,7 +238,6 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
         A(j,2) = point[j].z;
     }
 
-    // A * [a,b,c]^T = -1；QR 比直接求逆更稳定。
     Matrix<T, 3, 1> normvec = A.colPivHouseholderQr().solve(b);
 
     T n = normvec.norm();
@@ -244,7 +246,6 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
     pca_result(2) = normvec(2) / n;
     pca_result(3) = 1.0 / n;
 
-    // 5 个近邻中只要有一点偏离过大，就认为该局部邻域不能可靠表示平面。
     for (int j = 0; j < NUM_MATCH_POINTS; j++)
     {
         if (fabs(pca_result(0) * point[j].x + pca_result(1) * point[j].y + pca_result(2) * point[j].z + pca_result(3)) > threshold)
@@ -253,19 +254,6 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
         }
     }
     return true;
-}
-
-double get_time_sec(const builtin_interfaces::msg::Time &time)
-{
-    return rclcpp::Time(time).seconds();
-}
-
-rclcpp::Time get_ros_time(double timestamp)
-{
-    int32_t sec = std::floor(timestamp);
-    auto nanosec_d = (timestamp - std::floor(timestamp)) * 1e9;
-    uint32_t nanosec = nanosec_d;
-    return rclcpp::Time(sec, nanosec);
 }
 
 #endif

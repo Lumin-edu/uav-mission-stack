@@ -408,7 +408,6 @@ void KD_TREE<PointType>::run_operation(KD_TREE_NODE **root, Operation_Logger_Typ
 template <typename PointType>
 void KD_TREE<PointType>::Build(PointVector point_cloud)
 {
-    // 首帧静态建树：按空间跨度最大的轴递归取中位数，生成初始平衡 kd-tree。
     if (Root_Node != nullptr)
     {
         delete_tree_nodes(&Root_Node);
@@ -426,7 +425,6 @@ void KD_TREE<PointType>::Build(PointVector point_cloud)
 template <typename PointType>
 void KD_TREE<PointType>::Nearest_Search(PointType point, int k_nearest, PointVector &Nearest_Points, vector<float> &Point_Distance, float max_dist)
 {
-    // 固定容量大顶堆保存当前 k 个最近点，节点包围盒用于剪枝；输出按距离从近到远排列。
     MANUAL_HEAP q(2 * k_nearest);
     q.clear();
     vector<float>().swap(Point_Distance);
@@ -490,7 +488,6 @@ int KD_TREE<PointType>::Add_Points(PointVector &PointToAdd, bool downsample_on)
     {
         if (downsample_switch)
         {
-            // 查询点所在体素，只保留离体素中心最近的代表点，再以增量操作修改树。
             Box_of_Point.vertex_min[0] = floor(PointToAdd[i].x / downsample_size) * downsample_size;
             Box_of_Point.vertex_max[0] = Box_of_Point.vertex_min[0] + downsample_size;
             Box_of_Point.vertex_min[1] = floor(PointToAdd[i].y / downsample_size) * downsample_size;
@@ -634,7 +631,6 @@ void KD_TREE<PointType>::Delete_Points(PointVector &PointToDel)
 template <typename PointType>
 int KD_TREE<PointType>::Delete_Point_Boxes(vector<BoxPointType> &BoxPoints)
 {
-    // 局部地图滑窗按轴对齐盒批量删除；子树完全被盒覆盖时可整棵标记，无需逐点遍历。
     int tmp_counter = 0;
     for (int i = 0; i < BoxPoints.size(); i++)
     {
@@ -702,7 +698,7 @@ void KD_TREE<PointType>::BuildTree(KD_TREE_NODE **root, int l, int r, PointVecto
         max_value[1] = max(max_value[1], Storage[i].y);
         max_value[2] = max(max_value[2], Storage[i].z);
     }
-    // 选择跨度最大的维度作为分割轴，降低狭长点云导致树退化的概率。
+    // Select the longest dimension as division axis
     for (i = 0; i < 3; i++)
         dim_range[i] = max_value[i] - min_value[i];
     for (i = 1; i < 3; i++)
@@ -739,7 +735,6 @@ void KD_TREE<PointType>::BuildTree(KD_TREE_NODE **root, int l, int r, PointVecto
 template <typename PointType>
 void KD_TREE<PointType>::Rebuild(KD_TREE_NODE **root)
 {
-    // 小子树同步重建；大子树交给后台线程重建，前台搜索/插入通过操作日志保持一致。
     KD_TREE_NODE *father_ptr;
     if ((*root)->TreeSize >= Multi_Thread_Rebuild_Point_Num)
     {
@@ -1350,7 +1345,6 @@ bool KD_TREE<PointType>::Criterion_Check(KD_TREE_NODE *root)
         son_ptr = root->right_son_ptr;
     delete_evaluation = float(root->invalid_point_num) / root->TreeSize;
     balance_evaluation = float(son_ptr->TreeSize) / (root->TreeSize - 1);
-    // 删除比例过高或左右规模明显失衡时触发重建，回收懒删除节点并恢复查询效率。
     if (delete_evaluation > delete_criterion_param)
     {
         return true;
@@ -1365,7 +1359,6 @@ bool KD_TREE<PointType>::Criterion_Check(KD_TREE_NODE *root)
 template <typename PointType>
 void KD_TREE<PointType>::Push_Down(KD_TREE_NODE *root)
 {
-    // 懒删除标志只在访问子树时下推；整棵被覆盖的子树无需立即逐点遍历。
     if (root == nullptr)
         return;
     Operation_Logger_Type operation;
@@ -1732,3 +1725,4 @@ bool KD_TREE<PointType>::point_cmp_z(PointType a, PointType b) { return a.z < b.
 template class KD_TREE<pcl::PointXYZ>;
 template class KD_TREE<pcl::PointXYZI>;
 template class KD_TREE<pcl::PointXYZINormal>;
+

@@ -179,6 +179,7 @@ if(ROS_EDITION STREQUAL "ROS1")
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch_ROS1
   )
 
+
   #---------------------------------------------------------------------------------------
   # end of CMakeList.txt
   #---------------------------------------------------------------------------------------
@@ -245,82 +246,77 @@ else(ROS_EDITION STREQUAL "ROS2")
     LIBRARY_NAME ${PROJECT_NAME}
   )
 
-  # The custom message interfaces are also used by Point-LIO in simulation.
-  # Keep them buildable without the hardware SDK; build the actual driver node
-  # only when the SDK is installed, preserving the real MID-360 path.
-  find_library(LIVOX_LIDAR_SDK_LIBRARY liblivox_lidar_sdk_shared.so /usr/local/lib)
+  ## make sure the livox_lidar_sdk_shared library is installed
+  find_library(LIVOX_LIDAR_SDK_LIBRARY liblivox_lidar_sdk_shared.so /usr/local/lib REQUIRED)
+
+  ##
   find_path(LIVOX_LIDAR_SDK_INCLUDE_DIR
-    NAMES "livox_lidar_api.h")
+    NAMES "livox_lidar_api.h" "livox_lidar_def.h"
+    REQUIRED)
 
   ## PCL library
   link_directories(${PCL_LIBRARY_DIRS})
   add_definitions(${PCL_DEFINITIONS})
 
-  if(LIVOX_LIDAR_SDK_LIBRARY AND LIVOX_LIDAR_SDK_INCLUDE_DIR)
-    # livox ros2 driver target
-    ament_auto_add_library(${PROJECT_NAME} SHARED
-      src/livox_ros_driver2.cpp
-      src/lddc.cpp
-      src/driver_node.cpp
-      src/lds.cpp
-      src/lds_lidar.cpp
+  # livox ros2 driver target
+  ament_auto_add_library(${PROJECT_NAME} SHARED
+    src/livox_ros_driver2.cpp
+    src/lddc.cpp
+    src/driver_node.cpp
+    src/lds.cpp
+    src/lds_lidar.cpp
 
-      src/comm/comm.cpp
-      src/comm/ldq.cpp
-      src/comm/semaphore.cpp
-      src/comm/lidar_imu_data_queue.cpp
-      src/comm/cache_index.cpp
-      src/comm/pub_handler.cpp
+    src/comm/comm.cpp
+    src/comm/ldq.cpp
+    src/comm/semaphore.cpp
+    src/comm/lidar_imu_data_queue.cpp
+    src/comm/cache_index.cpp
+    src/comm/pub_handler.cpp
 
-      src/parse_cfg_file/parse_cfg_file.cpp
-      src/parse_cfg_file/parse_livox_lidar_cfg.cpp
+    src/parse_cfg_file/parse_cfg_file.cpp
+    src/parse_cfg_file/parse_livox_lidar_cfg.cpp
 
-      src/call_back/lidar_common_callback.cpp
-      src/call_back/livox_lidar_callback.cpp
-    )
+    src/call_back/lidar_common_callback.cpp
+    src/call_back/livox_lidar_callback.cpp
+  )
 
-    target_include_directories(${PROJECT_NAME} PRIVATE ${livox_sdk_INCLUDE_DIRS})
+  target_include_directories(${PROJECT_NAME} PRIVATE ${livox_sdk_INCLUDE_DIRS})
 
-    # get include directories of custom msg headers
-    if(DISTRO_ROS STREQUAL "humble" OR DISTRO_ROS STREQUAL "jazzy")
-      rosidl_get_typesupport_target(cpp_typesupport_target
-      ${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
-      target_link_libraries(${PROJECT_NAME} "${cpp_typesupport_target}")
-    else()
-      set(LIVOX_INTERFACE_TARGET "${LIVOX_INTERFACES}__rosidl_typesupport_cpp")
-      add_dependencies(${PROJECT_NAME} ${LIVOX_INTERFACES})
-      get_target_property(LIVOX_INTERFACES_INCLUDE_DIRECTORIES ${LIVOX_INTERFACE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
-    endif()
-
-    # include file direcotry
-    target_include_directories(${PROJECT_NAME} PUBLIC
-      ${PCL_INCLUDE_DIRS}
-      ${APR_INCLUDE_DIRS}
-      ${LIVOX_LIDAR_SDK_INCLUDE_DIR}
-      ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
-      3rdparty
-      src
-    )
-
-    # link libraries
-    target_link_libraries(${PROJECT_NAME}
-      ${LIVOX_LIDAR_SDK_LIBRARY}
-      ${LIVOX_INTERFACE_TARGET}   # for custom msgs
-      ${PPT_LIBRARY}
-      ${Boost_LIBRARY}
-      ${PCL_LIBRARIES}
-      ${APR_LIBRARIES}
-    )
-
-    rclcpp_components_register_node(${PROJECT_NAME}
-      PLUGIN "livox_ros::DriverNode"
-      EXECUTABLE ${PROJECT_NAME}_node
-    )
+  # get include directories of custom msg headers
+  if(DISTRO_ROS STREQUAL "humble" OR DISTRO_ROS STREQUAL "jazzy")
+    rosidl_get_typesupport_target(cpp_typesupport_target
+    ${LIVOX_INTERFACES} "rosidl_typesupport_cpp")
+    target_link_libraries(${PROJECT_NAME} "${cpp_typesupport_target}")
   else()
-    message(WARNING
-      "Livox SDK was not found. Building Livox ROS message interfaces only; "
-      "the livox_ros_driver2 hardware node is unavailable until the SDK is installed.")
+    set(LIVOX_INTERFACE_TARGET "${LIVOX_INTERFACES}__rosidl_typesupport_cpp")
+    add_dependencies(${PROJECT_NAME} ${LIVOX_INTERFACES})
+    get_target_property(LIVOX_INTERFACES_INCLUDE_DIRECTORIES ${LIVOX_INTERFACE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
   endif()
+
+  # include file direcotry
+  target_include_directories(${PROJECT_NAME} PUBLIC
+    ${PCL_INCLUDE_DIRS}
+    ${APR_INCLUDE_DIRS}
+    ${LIVOX_LIDAR_SDK_INCLUDE_DIR}
+    ${LIVOX_INTERFACES_INCLUDE_DIRECTORIES}   # for custom msgs
+    3rdparty
+    src
+  )
+
+  # link libraries
+  target_link_libraries(${PROJECT_NAME}
+    ${LIVOX_LIDAR_SDK_LIBRARY}
+    ${LIVOX_INTERFACE_TARGET}   # for custom msgs
+    ${PPT_LIBRARY}
+    ${Boost_LIBRARY}
+    ${PCL_LIBRARIES}
+    ${APR_LIBRARIES}
+  )
+
+  rclcpp_components_register_node(${PROJECT_NAME}
+    PLUGIN "livox_ros::DriverNode"
+    EXECUTABLE ${PROJECT_NAME}_node
+  )
 
   if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)

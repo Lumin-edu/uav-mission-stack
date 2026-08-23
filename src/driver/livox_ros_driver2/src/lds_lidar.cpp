@@ -144,6 +144,13 @@ bool LdsLidar::InitLivoxLidar() {
     return false;
   }
 
+  // The SDK API exposes an explicit start step.  Newer SDK2 builds make this
+  // a no-op, while older builds require it before data callbacks are serviced.
+  if (!LivoxLidarSdkStart()) {
+    std::cout << "Failed to start livox lidar sdk." << std::endl;
+    return false;
+  }
+
   // fill in lidar devices
   for (auto& config : user_configs) {
     uint8_t index = 0;
