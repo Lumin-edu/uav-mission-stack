@@ -1,0 +1,102 @@
+<!-- Independent sysu mission: FAST-LIO + AprilTag + payload release + landing. -->
+<launch>
+  <arg name="mission_file" default="$(find bringup)/config/tag_drop_targets.yaml" />
+  <arg name="video_device" default="auto" />
+  <!-- Auto-select a TEP-C USB serial adapter, or override servo_port. -->
+  <arg name="servo_port" default="auto" />
+  <arg name="drop_tag_id" default="0" />
+  <arg name="landing_tag_id" default="0" />
+  <arg name="use_fastlio" default="true" />
+  <arg name="use_fastlio_mavros_visual_odom" default="true" />
+  <arg name="use_px4_monitor" default="false" />
+  <arg name="use_position_compare" default="false" />
+  <arg name="use_base_link_to_base_tf" default="true" />
+  <arg name="lidar_config_file" default="$(find livox_ros_driver2)/config/MID360_config.json" />
+  <arg name="fastlio_config_file" default="$(find bringup)/config/fastlio_mid360.yaml" />
+  <arg name="bd_list" default="100000000000000" />
+  <arg name="rviz" default="false" />
+  <arg name="offboard_rate_hz" default="20.0" />
+  <arg name="max_speed" default="0.5" />
+  <arg name="lock_yaw" default="true" />
+  <arg name="reference_capture_delay_sec" default="3.0" />
+  <arg name="setpoint_topic" default="/mavros/setpoint_position/local" />
+  <arg name="odom_topic" default="/Odometry" />
+  <arg name="vision_pose_topic" default="/mavros/vision_pose/pose" />
+  <arg name="vision_preview_topic" default="/bringup/visual_odom" />
+  <arg name="local_pose_topic" default="/mavros/local_position/pose" />
+
+  <include file="$(find bringup)/launch/hover_hw.launch">
+    <arg name="use_fastlio" value="$(arg use_fastlio)" />
+    <arg name="use_fastlio_mavros_visual_odom" value="$(arg use_fastlio_mavros_visual_odom)" />
+    <arg name="use_hover_control" value="false" />
+    <arg name="use_px4_control_watchdog" value="false" />
+    <arg name="use_px4_monitor" value="$(arg use_px4_monitor)" />
+    <arg name="use_position_compare" value="$(arg use_position_compare)" />
+    <arg name="use_base_link_to_base_tf" value="$(arg use_base_link_to_base_tf)" />
+    <arg name="lidar_config_file" value="$(arg lidar_config_file)" />
+    <arg name="fastlio_config_file" value="$(arg fastlio_config_file)" />
+    <arg name="bd_list" value="$(arg bd_list)" />
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="odom_topic" value="$(arg odom_topic)" />
+    <arg name="vision_pose_topic" value="$(arg vision_pose_topic)" />
+    <arg name="vision_preview_topic" value="$(arg vision_preview_topic)" />
+    <arg name="local_pose_topic" value="$(arg local_pose_topic)" />
+    <arg name="setpoint_topic" value="$(arg setpoint_topic)" />
+  </include>
+
+  <include file="$(find bringup)/launch/tag_drop_camera.launch">
+    <arg name="video_device" value="$(arg video_device)" />
+    <arg name="drop_tag_id" value="$(arg drop_tag_id)" />
+    <arg name="landing_tag_id" value="$(arg landing_tag_id)" />
+  </include>
+
+  <node pkg="bringup" type="bringup_servo.py" name="bringup_servo"
+        output="screen" required="true">
+    <param name="port" value="$(arg servo_port)" />
+    <rosparam param="port_candidates">
+      [/dev/robotac_servo, /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0, /dev/ttyACM1]
+    </rosparam>
+    <param name="baudrate" value="115200" />
+    <param name="channel" value="1" />
+    <param name="frequency_hz" value="50" />
+    <param name="pwm_min_duty" value="3" />
+    <param name="pwm_max_duty" value="12" />
+    <param name="blocked_angle" value="0.0" />
+    <param name="released_angle" value="90.0" />
+    <param name="drive_seconds" value="0.30" />
+    <param name="idle_duty" value="0" />
+    <param name="allow_repeat" value="false" />
+  </node>
+
+  <rosparam command="load" file="$(arg mission_file)" ns="tag_drop_mission" />
+  <node pkg="bringup" type="tag_drop_mission.py" name="tag_drop_mission"
+        output="screen" required="true">
+    <param name="drop_waypoint" value="5" />
+    <param name="lock_yaw" value="$(arg lock_yaw)" />
+    <param name="rate" value="$(arg offboard_rate_hz)" />
+    <param name="max_speed" value="$(arg max_speed)" />
+    <param name="origin_delay" value="$(arg reference_capture_delay_sec)" />
+    <param name="fastlio_topic" value="$(arg odom_topic)" />
+    <param name="local_pose_topic" value="$(arg local_pose_topic)" />
+    <param name="vision_pose_topic" value="$(arg vision_preview_topic)" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    <param name="vision_health_topic" value="/fastlio_to_mavros_visual_odom/healthy" />
+    <param name="frame_id" value="map" />
+    <param name="tag_timeout" value="0.8" />
+    <param name="tag_xy_tolerance" value="0.15" />
+    <param name="tag_max_step" value="0.20" />
+    <!-- Search for 3 s; if no Tag is found, release at the waypoint anyway. -->
+    <param name="drop_search_seconds" value="3.0" />
+    <param name="landing_height" value="0.25" />
+    <param name="landing_descent_speed" value="0.15" />
+    <param name="landing_altitude_tolerance" value="0.08" />
+    <param name="release_service" value="/bringup_servo/set_released" />
+    <param name="land_service" value="/mavros/cmd/land" />
+  </node>
+
+  <node pkg="bringup" type="px4_control_watchdog.py"
+        name="tag_drop_control_watchdog" output="screen">
+    <param name="control_source" value="tag_drop_mission" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+  </node>
+</launch>

@@ -1,0 +1,11 @@
+tag_family: tag36h11
+tag_threads: 2
+tag_decimate: 1.0
+tag_blur: 0.0
+tag_refine_edges: 1
+tag_debug: 0
+max_hamming_dist: 2
+remove_duplicates: true
+publish_tf: false
+publish_tag_detections_image: false
+transport_hint: raw

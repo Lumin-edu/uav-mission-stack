@@ -1,0 +1,68 @@
+<!-- Independent eight-point FAST-LIO + MAVROS mission bringup. MAVROS is external. -->
+<launch>
+  <arg name="mission_file" default="$(find bringup)/config/up_targets.yaml" />
+  <arg name="use_fastlio" default="true" />
+  <arg name="use_fastlio_mavros_visual_odom" default="true" />
+  <arg name="use_px4_monitor" default="false" />
+  <arg name="use_position_compare" default="false" />
+  <arg name="use_base_link_to_base_tf" default="true" />
+  <arg name="lidar_config_file"
+       default="$(find livox_ros_driver2)/config/MID360_config.json" />
+  <arg name="fastlio_config_file"
+       default="$(find bringup)/config/fastlio_mid360.yaml" />
+  <arg name="bd_list" default="100000000000000" />
+  <arg name="rviz" default="false" />
+
+  <arg name="lock_yaw" default="true" />
+  <arg name="offboard_rate_hz" default="20.0" />
+  <arg name="max_speed" default="0.8" />
+  <arg name="reference_capture_delay_sec" default="3.0" />
+  <arg name="setpoint_topic" default="/mavros/setpoint_position/local" />
+  <arg name="odom_topic" default="/Odometry" />
+  <arg name="vision_pose_topic" default="/mavros/vision_pose/pose" />
+  <arg name="vision_preview_topic" default="/bringup/visual_odom" />
+  <arg name="local_pose_topic" default="/mavros/local_position/pose" />
+
+  <!-- Reuse the validated sensor and visual-odometry chain only. -->
+  <include file="$(find bringup)/launch/hover_hw.launch">
+    <arg name="use_fastlio" value="$(arg use_fastlio)" />
+    <arg name="use_fastlio_mavros_visual_odom"
+         value="$(arg use_fastlio_mavros_visual_odom)" />
+    <arg name="use_hover_control" value="false" />
+    <arg name="use_px4_control_watchdog" value="false" />
+    <arg name="use_px4_monitor" value="$(arg use_px4_monitor)" />
+    <arg name="use_position_compare" value="$(arg use_position_compare)" />
+    <arg name="use_base_link_to_base_tf" value="$(arg use_base_link_to_base_tf)" />
+    <arg name="lidar_config_file" value="$(arg lidar_config_file)" />
+    <arg name="fastlio_config_file" value="$(arg fastlio_config_file)" />
+    <arg name="bd_list" value="$(arg bd_list)" />
+    <arg name="rviz" value="$(arg rviz)" />
+    <arg name="odom_topic" value="$(arg odom_topic)" />
+    <arg name="vision_pose_topic" value="$(arg vision_pose_topic)" />
+    <arg name="vision_preview_topic" value="$(arg vision_preview_topic)" />
+    <arg name="local_pose_topic" value="$(arg local_pose_topic)" />
+    <arg name="setpoint_topic" value="$(arg setpoint_topic)" />
+  </include>
+
+  <rosparam command="load" file="$(arg mission_file)" ns="multi_point_up" />
+  <node pkg="bringup" type="up.py" name="multi_point_up"
+        output="screen" required="true">
+    <param name="lock_yaw" value="$(arg lock_yaw)" />
+    <param name="rate" value="$(arg offboard_rate_hz)" />
+    <param name="max_speed" value="$(arg max_speed)" />
+    <param name="origin_delay" value="$(arg reference_capture_delay_sec)" />
+    <param name="fastlio_topic" value="$(arg odom_topic)" />
+    <param name="local_pose_topic" value="$(arg local_pose_topic)" />
+    <param name="vision_pose_topic" value="$(arg vision_preview_topic)" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    <param name="vision_health_topic"
+           value="/fastlio_to_mavros_visual_odom/healthy" />
+    <param name="frame_id" value="map" />
+  </node>
+
+  <node pkg="bringup" type="px4_control_watchdog.py"
+        name="px4_control_watchdog" output="screen">
+    <param name="control_source" value="multi_point_up" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+  </node>
+</launch>

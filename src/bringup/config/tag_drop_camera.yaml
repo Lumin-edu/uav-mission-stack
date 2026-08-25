@@ -1,0 +1,22 @@
+# Independent sysu camera calibration for 1920x1080 images.
+# Replace this file if the installed camera or resolution changes.
+image_width: 1920
+image_height: 1080
+camera_name: sysu_rgb
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1377.00111, 0, 866.680812, 0, 1376.06455, 553.518700, 0, 0, 1]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.02528598, -0.01133927, 0.00019289, -0.00077216, 0.03408396]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1377.00111, 0, 866.680812, 0, 0, 1376.06455, 553.518700, 0, 0, 0, 1, 0]

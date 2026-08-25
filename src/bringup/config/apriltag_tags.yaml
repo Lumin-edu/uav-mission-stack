@@ -1,0 +1,4 @@
+# Black coding-region size in metres. Set IDs to the physical tags.
+standalone_tags:
+  - {id: 0, size: 0.15, name: drop_tag_0}
+tag_bundles: []

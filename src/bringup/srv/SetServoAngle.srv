@@ -1,0 +1,6 @@
+float32 angle
+---
+bool success
+string message
+float32 angle
+uint8 duty

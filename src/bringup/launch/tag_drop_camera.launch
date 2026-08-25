@@ -1,0 +1,49 @@
+<!-- Camera and detector are owned by sysu; no robotac package is included. -->
+<launch>
+  <!-- Auto-select a TEP-C video node, or override with /dev/videoN. -->
+  <arg name="video_device" default="auto" />
+  <arg name="width" default="1920" />
+  <arg name="height" default="1080" />
+  <arg name="framerate" default="30.0" />
+  <arg name="camera_info_file" default="$(find bringup)/config/tag_drop_camera.yaml" />
+  <arg name="drop_tag_id" default="0" />
+  <arg name="landing_tag_id" default="0" />
+
+  <node pkg="bringup" type="camera_node.py" name="bringup_camera"
+        output="screen" required="true">
+    <param name="video_device" value="$(arg video_device)" />
+    <rosparam param="video_device_candidates">
+      [/dev/video0, /dev/video1, /dev/video2, /dev/video3, /dev/robotac_rgb_camera]
+    </rosparam>
+    <param name="width" value="$(arg width)" />
+    <param name="height" value="$(arg height)" />
+    <param name="framerate" value="$(arg framerate)" />
+    <param name="camera_frame_id" value="camera_rgb_optical_frame" />
+    <param name="camera_info_file" value="$(arg camera_info_file)" />
+  </node>
+
+  <node pkg="apriltag_ros" type="apriltag_ros_continuous_node"
+        name="bringup_apriltag_detector" clear_params="true"
+        output="screen" required="true">
+    <remap from="image_rect" to="/camera/rgb/image_raw" />
+    <remap from="camera_info" to="/camera/rgb/camera_info" />
+    <rosparam command="load" file="$(find bringup)/config/apriltag_settings.yaml" />
+    <rosparam command="load" file="$(find bringup)/config/apriltag_tags.yaml" />
+    <param name="tag_family" value="tag36h11" />
+    <param name="publish_tf" value="false" />
+    <param name="publish_tag_detections_image" value="false" />
+    <param name="transport_hint" value="raw" />
+  </node>
+
+  <node pkg="bringup" type="tag_tracker.py" name="bringup_tag_tracker"
+        output="screen" required="true">
+    <param name="drop_tag_id" value="$(arg drop_tag_id)" />
+    <param name="landing_tag_id" value="$(arg landing_tag_id)" />
+    <param name="tag_timeout" value="0.8" />
+    <param name="stable_samples" value="5" />
+    <param name="jump_limit" value="0.15" />
+    <!-- Camera is 11.5 cm forward of the payload center. -->
+    <param name="camera_right_offset" value="0.0" />
+    <param name="camera_forward_offset" value="0.115" />
+  </node>
+</launch>

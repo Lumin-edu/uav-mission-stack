@@ -1,0 +1,24 @@
+<!-- Servo-only test. No camera, AprilTag, FAST-LIO, or MAVROS is started. -->
+<launch>
+  <arg name="servo_port" default="auto" />
+
+  <node pkg="bringup" type="bringup_servo.py" name="bringup_servo"
+        output="screen" required="true">
+    <param name="port" value="$(arg servo_port)" />
+    <rosparam param="port_candidates">
+      [/dev/robotac_servo, /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0, /dev/ttyACM1]
+    </rosparam>
+    <param name="baudrate" value="115200" />
+    <param name="channel" value="1" />
+    <param name="frequency_hz" value="50" />
+    <param name="pwm_min_duty" value="3" />
+    <param name="pwm_max_duty" value="12" />
+    <param name="blocked_angle" value="0.0" />
+    <param name="released_angle" value="180.0" />
+    <param name="min_angle" value="0.0" />
+    <param name="max_angle" value="180.0" />
+    <param name="drive_seconds" value="0.30" />
+    <param name="idle_duty" value="0" />
+    <param name="allow_repeat" value="true" />
+  </node>
+</launch>

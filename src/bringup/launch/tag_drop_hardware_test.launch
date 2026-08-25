@@ -1,0 +1,31 @@
+<!-- Hardware-only test. Does not start MAVROS, FAST-LIO, or mission control. -->
+<launch>
+  <arg name="video_device" default="auto" />
+  <arg name="servo_port" default="auto" />
+  <arg name="drop_tag_id" default="0" />
+  <arg name="landing_tag_id" default="0" />
+
+  <include file="$(find bringup)/launch/tag_drop_camera.launch">
+    <arg name="video_device" value="$(arg video_device)" />
+    <arg name="drop_tag_id" value="$(arg drop_tag_id)" />
+    <arg name="landing_tag_id" value="$(arg landing_tag_id)" />
+  </include>
+
+  <node pkg="bringup" type="bringup_servo.py" name="bringup_servo"
+        output="screen" required="true">
+    <param name="port" value="$(arg servo_port)" />
+    <rosparam param="port_candidates">
+      [/dev/robotac_servo, /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0, /dev/ttyACM1]
+    </rosparam>
+    <param name="baudrate" value="115200" />
+    <param name="channel" value="1" />
+    <param name="frequency_hz" value="50" />
+    <param name="pwm_min_duty" value="3" />
+    <param name="pwm_max_duty" value="12" />
+    <param name="blocked_angle" value="0.0" />
+    <param name="released_angle" value="90.0" />
+    <param name="drive_seconds" value="0.30" />
+    <param name="idle_duty" value="0" />
+    <param name="allow_repeat" value="false" />
+  </node>
+</launch>
