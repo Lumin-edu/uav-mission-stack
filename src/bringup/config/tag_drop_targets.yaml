@@ -2,11 +2,11 @@
 # x = right of nose, y = forward, z = up, relative to captured origin.
 # The fifth point is the payload drop location.
 points:
-  - {target_x: 0.0,  target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 1.0,  target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 1.0,  target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 0.0,  target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: -1.0, target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 0.0,  target_y: -1.0, target_z: 0.40, target_yaw: 0.0}
+  - {target_x: 0.0,  target_y: 0.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: 0.0,  target_y: 1.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: 1.0,  target_y: 1.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: 1.0,  target_y: 3.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: 0.0, target_y: 3.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: -1.0, target_y: 3.0,  target_z: 0.30, target_yaw: 0.0}
+  - {target_x: -1.0, target_y: 0.0, target_z: 0.30, target_yaw: 0.0}
+  - {target_x: 0.0,  target_y: 0.0, target_z: 0.30, target_yaw: 0.0}

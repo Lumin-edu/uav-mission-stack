@@ -1,44 +1,36 @@
-# ROS1 FAST-LIO fixed-point bringup
+# ROS1 FAST-LIO 定点与抛投任务
 
-This package starts the MID360 driver, FAST-LIO, the FAST-LIO to MAVROS
-external-vision bridge, fixed-point control, and optional diagnostics. MAVROS
-is deliberately not included; start it separately first.
+本目录是独立的 ROS1 `bringup` 包，负责启动 MID360、FAST-LIO、FAST-LIO 到
+MAVROS 的视觉里程计桥接、定点任务、相机、AprilTag 和舵机。MAVROS 不由本
+目录启动，需要单独启动。
 
-The bringup monitor intentionally does not subscribe to a MAVROS distance
-sensor. The standard MAVROS PX4 plugin list also blacklists the
-`distance_sensor` plugin; any `distance_sensor/*` parameters printed while
-MAVROS loads `px4_config.yaml` are configuration entries only.
+## 坐标系
 
-## Coordinate contract
+任务点使用 RFU 坐标，原点是任务启动后捕获的 PX4/MAVROS 本地位置：
 
-`target_x`, `target_y`, `target_z` are task offsets in the vehicle RFU frame:
+- `target_x`：机头右方
+- `target_y`：机头前方
+- `target_z`：机头上方
 
-* `x`: right of the nose
-* `y`: forward from the nose
-* `z`: up
+FAST-LIO 输入话题是 `/Odometry`，视觉桥发布 ROS ENU 到
+`/mavros/vision_pose/pose`，MAVROS 再转换给 PX4。任务点由捕获的 PX4 yaw
+转换为 MAVROS local ENU 后发送到 `/mavros/setpoint_position/local`。默认
+`lock_yaw:=true`，飞行过程中保持捕获时的 yaw。`base_link -> base` 杠杆
+臂默认是 0 m。
 
-FAST-LIO publishes `nav_msgs/Odometry` on `/Odometry`. The bridge captures its
-initial corrected pose, applies the zero default `base_link -> base` lever arm,
-and publishes ROS ENU `PoseStamped` messages on `/mavros/vision_pose/pose`.
-MAVROS converts that ENU pose to PX4 NED. The fixed-point controller converts
-the RFU task offset using the captured MAVROS local yaw before publishing
-`/mavros/setpoint_position/local`. `lock_yaw:=true` (the default) sends a
-fixed setpoint yaw equal to the captured PX4 yaw; `target_yaw:=0.0` keeps it
-exactly equal to capture.
+## MAVROS 与基本启动
 
-## Launch
+先单独启动 MAVROS：
 
 ```bash
-  source /opt/ros/noetic/setup.bash
-  source /home/yundrone/sysu/devel/setup.bash
-  roslaunch mavros px4.launch fcu_url:=/dev/ttyTHS0:921600
-
-cd /home/yundrone/sysu
 source /opt/ros/noetic/setup.bash
-source devel/setup.bash
+source /home/yundrone/sysu/devel/setup.bash
+roslaunch mavros px4.launch fcu_url:=/dev/ttyTHS0:921600
+```
 
-# Start MAVROS separately, using the vehicle's existing configuration.
-# Then start MID360 + FAST-LIO + visual odometry + hover:
+普通定点悬停：
+
+```bash
 cd /home/yundrone/sysu
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
@@ -46,126 +38,108 @@ roslaunch bringup hover_hw.launch \
   use_fastlio:=true \
   use_fastlio_mavros_visual_odom:=true \
   use_hover_control:=true \
-  use_px4_monitor:=true \
-  use_px4_control_watchdog:=true \
-  use_position_compare:=false \
   target_x:=0.0 target_y:=0.0 target_z:=0.4 \
   lock_yaw:=true target_yaw:=0.0 \
-  reference_capture_delay_sec:=3.0 \
   hover_auto_arm:=false
 ```
 
-With `hover_auto_arm:=false`, arm manually from the RC. After the controller
-has pre-streamed setpoints, it requests `OFFBOARD` through `/mavros/set_mode`.
+`hover_auto_arm:=false` 时由遥控器手动解锁；控制器预发布 setpoint 后请求
+PX4 `OFFBOARD`。
 
-FAST-LIO input topics are `/livox/lidar` and `/livox/imu`; the launch starts
-`livox_ros_driver2` with `MID360_config.json` and `fastlio_mid360.yaml`.
+## 八点抛投与降落任务
 
-## Eight-point mission
+启动文件是 `launch/tag_drop_mission.launch`，任务点文件是
+`config/tag_drop_targets.yaml`。
 
-`up.launch` is an independent sequential mission entry point. It reuses the
-MID360, FAST-LIO, and external-vision chain but does not start
-`fixed_point_hover.py`. The eight targets are in
-`config/up_targets.yaml`, in RFU coordinates relative to the captured origin.
-The sample mission climbs to 0.4 m and visits an eight-point square path while
-keeping the captured yaw (`lock_yaw:=true`). Do not run `hover_hw.launch` and
-`up.launch` together, since both would publish local-position setpoints.
+任务顺序：
 
-```bash
-cd /home/yundrone/sysu
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-roslaunch bringup up.launch \
-  mission_file:=$(rospack find bringup)/config/up_targets.yaml \
-  use_px4_monitor:=true \
-  lock_yaw:=true \
-  max_speed:=0.5
-```
+1. 依次飞行到第 1 至第 5 点。
+2. 第 5 点搜索 AprilTag ID 0 并进行水平 RFU 修正；对准后立即抛投。
+3. 如果在 `drop_search_seconds` 内未识别或未对准，仍在第 5 点抛投。
+4. 抛投后继续飞行第 6、7、8 点，不直接返航。
+5. 到达第 8 点后搜索 AprilTag ID 0，进行水平修正；对准后立即降落。
+6. 如果在 `landing_search_seconds` 内未识别或未对准，也在第 8 点降落。
 
-`max_speed` is the mission setpoint slew limit in m/s. It limits the norm of
-the position setpoint motion between control cycles; PX4 velocity parameters
-remain the final flight-controller limit.
+默认第 8 点 `target_z=0.0`，表示回到捕获原点高度。AprilTag 修正只改水平
+位置，最大修正速度默认是 `0.30 m/s`，比正常航线速度慢。
 
-Arm and start PX4 `OFFBOARD` according to the same procedure as the validated
-single-point mode. The mission publishes its current zero-based waypoint index
-on `/multi_point_up/waypoint_index` and latches completion on
-`/multi_point_up/mission_complete`.
+降落命令被 MAVROS 接受后，节点请求 `AUTO.LAND`。PX4 确认离开
+`OFFBOARD` 后，节点停止发布 Offboard setpoint。当 PX4 local z 与第 8 点
+实际目标高度误差不超过 5 cm，并且 PX4 报告已经在地面时，节点请求
+`/mavros/cmd/arming false` 完成停桨。
 
-## AprilTag drop-and-return mission
+### 可调 launch 参数
 
-`tag_drop_mission.launch` is a separate entry point. It does not start MAVROS
-and must not be run together with `hover_hw.launch` or `up.launch`. It visits
-the eight points in `config/tag_drop_targets.yaml`; point 5 is the drop point.
+- `drop_search_seconds`：到达第 5 点后，抛投识别与对准的最长时间，默认 `3.0` 秒。
+- `landing_search_seconds`：到达第 8 点后，降落识别与对准的最长时间，默认 `3.0` 秒。
+- `tag_correction_speed`：AprilTag 水平修正速度上限，默认 `0.30` m/s。
+- `max_speed`：正常航线速度上限，默认 `0.5` m/s。
+- `tag_xy_tolerance`：水平对准容差，默认 `0.15` m，可从 launch 命令设置。
+- `disarm_height_tolerance`：停桨高度误差，默认 `0.05` m。
+- `video_device`：相机设备，默认自动选择。
+- `servo_port`：舵机串口，默认自动选择。
 
-The TEP-C camera and servo are discovered independently. The default candidates
-are `/dev/video0`, `/dev/video1`, `/dev/robotac_rgb_camera` for the camera and
-`/dev/robotac_servo`, `/dev/ttyUSB0`, `/dev/ttyACM0` for the servo. Override them
-with `video_device:=...` and `servo_port:=...` when the actual enumeration is
-known.
-
-At point 5 the mission clears old detections and starts a three-second search.
-If a fresh Tag is detected, it applies the horizontal RFU correction only and
-releases immediately once inside `tag_xy_tolerance`. If no Tag is detected in
-three seconds, it releases at the point without correction. After release it
-returns to the captured origin, requires a new landing Tag, aligns horizontally,
-descends while the Tag remains fresh, and calls `/mavros/cmd/land`.
-
-The camera is 0.115 m forward of the payload center. The tracker uses the
-specified downward-camera convention (image top is aircraft forward) and maps
-camera optical coordinates to RFU as `(right, forward) = (camera_x,
--camera_y)`, then adds the 0.115 m forward camera offset. The calibration is
-copied into `config/tag_drop_camera.yaml`; replace it if the camera or
-resolution changes.
-
-Start MAVROS separately, then run:
+例如抛投对准 5 秒、降落对准 8 秒：
 
 ```bash
 cd /home/yundrone/sysu
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 roslaunch bringup tag_drop_mission.launch \
-  video_device:=auto \
-  servo_port:=auto \
-  drop_tag_id:=0 \
-  landing_tag_id:=0 \
-  max_speed:=0.5 \
-  lock_yaw:=true
+  video_device:=/dev/video0 \
+  servo_port:=/dev/ttyUSB0 \
+  drop_tag_id:=0 landing_tag_id:=0 \
+  drop_search_seconds:=5.0 \
+  landing_search_seconds:=5.0 \
+  tag_xy_tolerance:=0.15 \
+  tag_correction_speed:=0.30 \
+  disarm_height_tolerance:=0.05 \
+  max_speed:=0.5 lock_yaw:=true
 ```
 
-Useful checks before flight:
+MAVROS 必须先启动。不要同时启动 `hover_hw.launch`、`up.launch` 和
+`tag_drop_mission.launch`，否则会有多个节点同时发布位置 setpoint。
+
+## 相机与 AprilTag 检查
+
+相机默认分辨率 1920x1080、30 Hz。相机位于载荷中心前方 0.115 m，正下视，
+图像上方对应机头前方。检查命令：
 
 ```bash
 rostopic echo /tag_detections
 rostopic echo /bringup/tag/drop_offset_rfu
 rostopic echo /bringup/tag/landing_offset_rfu
+rostopic echo /bringup/tag/state
 rostopic echo /tag_drop_mission/mission_phase
-rosservice call /bringup_servo/set_released "data: false"
 ```
 
-For hardware-only testing, start `tag_drop_hardware_test.launch`. It does not
-start MAVROS, FAST-LIO, or the mission controller. The service call above sends
-the configured blocked position; `data: true` is the real release command and
-must only be used with the mechanism secured and the payload removed.
+上一轮日志中相机成功打开 `/dev/video0`，AprilTag 节点成功连接图像和相机
+内参，但没有出现 ID 0 检测，因此 tracker 没有发布稳定 offset，任务按 3 秒
+无识别兜底执行。这不表示相机节点故障，需要结合飞行高度、光照、Tag 尺寸
+和朝向继续检查 `/tag_detections`。
 
-For a servo-only test, start `servo_test.launch`. It sends no angle when the
-node starts. Choose an angle explicitly through the generated service; for
-example, 90 degrees sends duty 8 (`5A 01 00 32 08`) at 115200 baud:
+## 舵机
+
+舵机使用 115200 baud、原始 HEX 协议。启动不自动发送角度；手动测试：
 
 ```bash
 roslaunch bringup servo_test.launch servo_port:=/dev/ttyUSB0
 rosservice call /bringup_servo/set_angle "angle: 90.0"
 ```
 
-The response reports the calibrated duty. The service accepts any angle from
-0 to 180 degrees; with the default calibration, 0/90/180 degrees map to duty
-3/8/12. The node sends the protocol idle frame after an explicit command, but
-does not send an angle on startup or shutdown.
-
-The servo transport uses `115200` baud and writes raw binary frames, not ASCII.
-With the default calibration the diagnostic frames are:
+默认标定中 0/90/180 度对应 duty 3/8/12，90 度帧为：
 
 ```text
-blocked:  5A 01 00 32 03
-released: 5A 01 00 32 08
-idle:     5A 01 00 32 00
+5A 01 00 32 08
+```
+
+## 编译检查
+
+```bash
+cd /home/yundrone/sysu
+source /opt/ros/noetic/setup.bash
+catkin_make --pkg bringup
+source devel/setup.bash
+python3 -m py_compile src/bringup/scripts/*.py
+rossrv show bringup/SetServoAngle
 ```

@@ -2,11 +2,11 @@
 # x = right of the nose, y = forward from the nose, z = up.
 # Each point is relative to the captured mission origin.
 points:
-  - {target_x: 0.0,  target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 1.0,  target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 1.0,  target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 0.0,  target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: 1.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: 0.0,  target_z: 0.40, target_yaw: 0.0}
-  - {target_x: -1.0, target_y: -1.0, target_z: 0.40, target_yaw: 0.0}
-  - {target_x: 0.0,  target_y: -1.0, target_z: 0.00, target_yaw: 0.0}
+  - {target_x: 0.0,  target_y: 0.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: 0.0,  target_y: 1.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: 1.0,  target_y: 1.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: 1.0,  target_y: 2.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: -1.0, target_y: 2.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: 0.0, target_y: 2.0,  target_z: 0.60, target_yaw: 0.0}
+  - {target_x: -1.0, target_y: 2.0, target_z: 0.60, target_yaw: 0.0}
+  - {target_x: -1.0,  target_y: 2.0, target_z: 0.60, target_yaw: 0.0}

@@ -17,6 +17,12 @@
   <arg name="rviz" default="false" />
   <arg name="offboard_rate_hz" default="20.0" />
   <arg name="max_speed" default="0.5" />
+  <arg name="tag_correction_speed" default="0.30" />
+  <arg name="tag_xy_tolerance" default="0.15" />
+  <!-- Timers start when waypoint 5/8 is reached and include detection/alignment. -->
+  <arg name="drop_search_seconds" default="3.0" />
+  <arg name="landing_search_seconds" default="3.0" />
+  <arg name="disarm_height_tolerance" default="0.05" />
   <arg name="lock_yaw" default="true" />
   <arg name="reference_capture_delay_sec" default="3.0" />
   <arg name="setpoint_topic" default="/mavros/setpoint_position/local" />
@@ -83,15 +89,19 @@
     <param name="vision_health_topic" value="/fastlio_to_mavros_visual_odom/healthy" />
     <param name="frame_id" value="map" />
     <param name="tag_timeout" value="0.8" />
-    <param name="tag_xy_tolerance" value="0.15" />
+    <param name="tag_xy_tolerance" value="$(arg tag_xy_tolerance)" />
     <param name="tag_max_step" value="0.20" />
-    <!-- Search for 3 s; if no Tag is found, release at the waypoint anyway. -->
-    <param name="drop_search_seconds" value="3.0" />
-    <param name="landing_height" value="0.25" />
-    <param name="landing_descent_speed" value="0.15" />
-    <param name="landing_altitude_tolerance" value="0.08" />
+    <param name="tag_correction_speed" value="$(arg tag_correction_speed)" />
+    <!-- Release/land immediately when aligned, or execute when the timer expires. -->
+    <param name="drop_search_seconds" value="$(arg drop_search_seconds)" />
+    <param name="landing_height" value="0.0" />
+    <param name="landing_search_seconds" value="$(arg landing_search_seconds)" />
+    <param name="disarm_height_tolerance" value="$(arg disarm_height_tolerance)" />
+    <param name="disarm_retry_period" value="1.0" />
+    <param name="land_mode" value="AUTO.LAND" />
     <param name="release_service" value="/bringup_servo/set_released" />
     <param name="land_service" value="/mavros/cmd/land" />
+    <param name="arming_service" value="/mavros/cmd/arming" />
   </node>
 
   <node pkg="bringup" type="px4_control_watchdog.py"

@@ -121,10 +121,11 @@ class UpMission(FixedPointOffboard):
                       yaw_offset)
 
     def _capture_origin(self):
+        was_captured = self.origin_captured
         if not self.origin_captured:
             self.task_point = list(self.points[0][0]) if self.points else [0.0, 0.0, 0.0]
         captured = super(UpMission, self)._capture_origin()
-        if captured and self.mission_index == 0:
+        if captured and not was_captured and self.mission_index == 0:
             # The parent computed the first target with the same transform;
             # republish it with the per-point yaw and mission status.
             self._set_mission_target(reset_command=False)
