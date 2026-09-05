@@ -1,0 +1,47 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: camera_init
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Registered Cloud
+      Topic: /cloud_registered
+      Size (Pixels): 2
+      Style: Points
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: FAST-LIO Odometry
+      Topic: /Odometry
+      Shape:
+        Alpha: 1
+        Axes Length: 0.5
+        Axes Radius: 0.03
+        Color: 255; 25; 0
+        Head Length: 0.3
+        Head Radius: 0.1
+        Shaft Length: 0.5
+        Shaft Radius: 0.03
+        Value: true
+  Global Options:
+    Fixed Frame: camera_init
+    Frame Rate: 30
+  Name: FAST-LIO
+  Tools:
+    - Class: rviz_default_plugins/Interact
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 15
+      Focal Point: 0; 0; 0
+      Pitch: 0.5
+      Yaw: 0.8
