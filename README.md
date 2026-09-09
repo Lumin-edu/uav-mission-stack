@@ -236,12 +236,12 @@ colcon list --base-paths "${HARDWARE_BASE_PATHS[@]}"
 colcon build --symlink-install \
   --base-paths "${HARDWARE_BASE_PATHS[@]}" \
   --packages-up-to \
-    hx_bringup_pointlio_hover \
-    hx_bringup_square_mission \
-    hx_bringup_full_mission \
-    hx_bringup_ego \
-    hx_bringup_ego_multi_mission \
-    hx_bringup_ego_mpc \
+    bringup_pointlio_hover \
+    bringup_square_mission \
+    bringup_full_mission \
+    bringup_ego \
+    bringup_ego_multi_mission \
+    bringup_ego_mpc \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 source install/setup.bash
@@ -257,7 +257,7 @@ colcon build --symlink-install \
     src/control/px4_msgs \
     src/planning/ego-planner-swarm/src/planner \
     src/up \
-  --packages-up-to livox_ros_driver2 point_lio hx_bringup_ego \
+  --packages-up-to livox_ros_driver2 point_lio bringup_ego \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
@@ -308,12 +308,12 @@ colcon build --symlink-install \
   point_lio \
   px4_msgs \
   ego_planner \
-  hx_bringup_pointlio_hover \
-  hx_bringup_square_mission \
-  hx_bringup_full_mission \
-  hx_bringup_ego \
-  hx_bringup_ego_multi_mission \
-  hx_bringup_ego_mpc \
+  bringup_pointlio_hover \
+  bringup_square_mission \
+  bringup_full_mission \
+  bringup_ego \
+  bringup_ego_multi_mission \
+  bringup_ego_mpc \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 source install/setup.bash
@@ -328,7 +328,7 @@ colcon build --symlink-install \
     src/control/px4_msgs \
     src/perception/Point-LIO \
     src/up \
-  --packages-up-to livox_ros_driver2 hx_bringup_pointlio_hover \
+  --packages-up-to livox_ros_driver2 bringup_pointlio_hover \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
@@ -382,7 +382,7 @@ sudo MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch hx_bringup_pointlio_hover hover_hw.launch.py \
+ros2 launch bringup_pointlio_hover hover_hw.launch.py \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
   use_hover_control:=true \
@@ -427,7 +427,7 @@ cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
+ros2 launch bringup_ego ego_avoidance_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
@@ -455,7 +455,7 @@ MID-360 /livox/lidar + /livox/imu
 `xy_valid/z_valid` 和监控输出都正常后，再使用双重安全门：
 
 ```bash
-ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
+ros2 launch bringup_ego ego_avoidance_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
@@ -478,16 +478,16 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
 
 ```bash
 # 正方形航点
-ros2 launch hx_bringup_square_mission square_mission_hw.launch.py
+ros2 launch bringup_square_mission square_mission_hw.launch.py
 
 # 完整航点任务
-ros2 launch hx_bringup_full_mission full_mission_hw.launch.py
+ros2 launch bringup_full_mission full_mission_hw.launch.py
 
 # EGO 多任务点
-ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py
+ros2 launch bringup_ego_multi_mission ego_multi_mission_hw.launch.py
 
 # EGO MPC 外环（独立包）
-ros2 launch hx_bringup_ego_mpc ego_mpc_hw.launch.py
+ros2 launch bringup_ego_mpc ego_mpc_hw.launch.py
 ```
 
 `bringup_ego` 和 `bringup_ego_mpc` 使用 `output_enabled` 与

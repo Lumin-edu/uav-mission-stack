@@ -1,4 +1,4 @@
-# hx_bringup_full_mission
+# bringup_full_mission
 
 完整航点任务包。Point-LIO 负责 PX4 EKF2 外部视觉定位；D435i 不发布定位信息，不修正 `/fmu/in/vehicle_visual_odometry`，只给当前 setpoint 提供有限修正量。
 
@@ -35,7 +35,7 @@ PX4 消息计算，因此不会重复补偿。
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch hx_bringup_full_mission full_mission_hw.launch.py \
+ros2 launch bringup_full_mission full_mission_hw.launch.py \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
   use_px4_control_watchdog:=true \
@@ -257,7 +257,7 @@ ring_lateral_sign:=-1.0
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 launch hx_bringup_full_mission full_mission_hw.launch.py \
+ros2 launch bringup_full_mission full_mission_hw.launch.py \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
   use_px4_control_watchdog:=true \

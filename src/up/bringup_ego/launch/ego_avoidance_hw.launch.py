@@ -43,7 +43,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    ego_hw_share = get_package_share_directory("hx_bringup_ego")
+    ego_hw_share = get_package_share_directory("bringup_ego")
     pointlio_share = get_package_share_directory("point_lio")
     livox_share = get_package_share_directory("livox_ros_driver2")
 
@@ -78,7 +78,7 @@ def generate_launch_description():
     )
 
     base_odom = Node(
-        package="hx_bringup_ego",
+        package="bringup_ego",
         executable="rigid_odom_transform.py",
         name="pointlio_base_odom_transform",
         output="screen",
@@ -95,7 +95,7 @@ def generate_launch_description():
 
     # ========== Node 3: Point-LIO → PX4 视觉里程计桥接 ==========
     pointlio_to_px4 = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="pointlio_to_px4_visual_odom.py",
         name="pointlio_to_px4_visual_odom",
         output="screen",
@@ -210,7 +210,7 @@ def generate_launch_description():
     # 将 EGO 的 PositionCommand 转换为 PX4 NED 的 TrajectorySetpoint
     # 管理完整的起飞流程：prestream → 解锁 → Offboard → 起飞 → EGO 控制
     px4_bridge = Node(
-        package="hx_bringup_ego",
+        package="bringup_ego",
         executable="ego_px4_bridge.py",
         name="ego_px4_bridge",
         output="screen",
@@ -260,7 +260,7 @@ def generate_launch_description():
     # ========== Node 8: 启动目标发布 ==========
     # 起飞完成后向 EGO 规划器发布初始目标航点，触发轨迹规划
     startup_goal = Node(
-        package="hx_bringup_ego",
+        package="bringup_ego",
         executable="startup_goal.py",
         name="ego_hw_startup_goal",
         output="screen",
@@ -292,7 +292,7 @@ def generate_launch_description():
     #   landing_requested=true：PX4 正在下降，桥接仍维持心跳但禁止重进 Offboard；
     #   landing_complete=true ：PX4 landed=true，桥接才彻底停止心跳和 setpoint。
     auto_land = Node(
-        package="hx_bringup_ego",
+        package="bringup_ego",
         executable="auto_land_after_goal.py",
         name="ego_auto_land_after_goal",
         output="screen",
@@ -325,7 +325,7 @@ def generate_launch_description():
     )
 
     hardware_monitor = Node(
-        package="hx_bringup_ego",
+        package="bringup_ego",
         executable="ego_hw_monitor.py",
         name="ego_hw_monitor",
         output="screen",
@@ -343,7 +343,7 @@ def generate_launch_description():
     )
 
     px4_dds_monitor = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_dds_monitor.py",
         name="ego_px4_dds_monitor",
         output="screen",
@@ -351,7 +351,7 @@ def generate_launch_description():
     )
 
     px4_control_watchdog = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_control_watchdog.py",
         name="ego_px4_control_watchdog",
         output="screen",
@@ -360,7 +360,7 @@ def generate_launch_description():
     )
 
     px4_pointlio_position_compare = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_pointlio_position_compare.py",
         name="ego_px4_pointlio_position_compare",
         output="screen",

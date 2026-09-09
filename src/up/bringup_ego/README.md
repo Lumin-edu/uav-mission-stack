@@ -1,4 +1,4 @@
-# hx_bringup_ego
+# bringup_ego
 
 Standalone hardware bringup for MID-360, Point-LIO, EGO Planner, and PX4
 Offboard control.
@@ -119,7 +119,7 @@ Gazebo zero-duration-scan configuration.
 cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select \
-  hx_bringup_pointlio_hover hx_bringup_ego
+  bringup_pointlio_hover bringup_ego
 ```
 
 ## Planning-only check
@@ -130,7 +130,7 @@ disabled while checking the sensor, estimator, and planner chain:
 ```bash
 cd /home/wu/sim-ego/uav-mission-stack
 source install/setup.bash
-ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
+ros2 launch bringup_ego ego_avoidance_hw.launch.py \
   goal_x:=1.0 goal_y:=0.0 goal_z:=0.5 \
   takeoff_before_ego:=false \
   output_enabled:=false \
@@ -166,7 +166,7 @@ until stable, publishes the configured EGO goal, and hands control to EGO:
 ```bash
 cd /home/wu/sim-ego/uav-mission-stack
 source install/setup.bash
-ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
+ros2 launch bringup_ego ego_avoidance_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \

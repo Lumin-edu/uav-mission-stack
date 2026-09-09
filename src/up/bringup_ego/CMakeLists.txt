@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(hx_bringup_ego)
+project(bringup_ego)
 
 find_package(ament_cmake REQUIRED)
 
@@ -37,6 +37,10 @@ if(BUILD_TESTING)
   ament_add_test(test_raw_pointlio_contract
     GENERATE_RESULT_FOR_RETURN_CODE_ZERO
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_raw_pointlio_contract.py
+  )
+  ament_add_test(test_package_names
+    GENERATE_RESULT_FOR_RETURN_CODE_ZERO
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_package_names.py
   )
 endif()
 

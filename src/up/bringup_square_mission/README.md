@@ -1,6 +1,6 @@
-# hx_bringup_square_mission
+# bringup_square_mission
 
-独立正方形航点任务包。`hx_bringup_pointlio_hover` 不改动，本包复制已验证的 Point-LIO -> PX4 EKF2 visual odom 链路，只把 Offboard 控制器换成正方形任务。
+独立正方形航点任务包。`bringup_pointlio_hover` 不改动，本包复制已验证的 Point-LIO -> PX4 EKF2 visual odom 链路，只把 Offboard 控制器换成正方形任务。
 
 ```text
 Point-LIO /odom
@@ -38,7 +38,7 @@ PX4 消息计算，因此不会重复补偿。
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --packages-select hx_bringup_square_mission --symlink-install
+colcon build --packages-select bringup_square_mission --symlink-install
 source install/setup.bash
 ```
 
@@ -46,7 +46,7 @@ source install/setup.bash
 
 ```bash
 source install/setup.bash
-ros2 launch hx_bringup_square_mission square_mission_hw.launch.py \
+ros2 launch bringup_square_mission square_mission_hw.launch.py \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
   use_px4_monitor:=true \

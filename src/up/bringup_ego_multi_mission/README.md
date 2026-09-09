@@ -1,8 +1,8 @@
-# hx_bringup_ego_multi_mission
+# bringup_ego_multi_mission
 
 实机 EGO 多任务点启动包。它将已经验证过的单任务实机节点、配置和坐标
-补偿逻辑复制到本包内独立维护，不依赖 `hx_bringup_ego` 或
-`hx_bringup_pointlio_hover`，也不修改 Point-LIO 或 EGO 源码。
+补偿逻辑复制到本包内独立维护，不依赖 `bringup_ego` 或
+`bringup_pointlio_hover`，也不修改 Point-LIO 或 EGO 源码。
 
 ## 数据链路
 
@@ -49,7 +49,7 @@ ros_yaw = -task_yaw
 ```bash
 cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select hx_bringup_ego_multi_mission
+colcon build --symlink-install --packages-select bringup_ego_multi_mission
 source install/setup.bash
 ```
 
@@ -58,7 +58,7 @@ source install/setup.bash
 默认 `output_enabled:=false`、`auto_arm:=false`，用于先检查链路：
 
 ```bash
-ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
+ros2 launch bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
@@ -71,7 +71,7 @@ ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
 开启 PX4 输出：
 
 ```bash
-ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
+ros2 launch bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
   output_enabled:=true \
   hardware_confirmation:=ENABLE_PX4_OUTPUT \
   auto_arm:=false \

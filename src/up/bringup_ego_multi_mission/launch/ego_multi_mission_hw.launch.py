@@ -41,7 +41,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    ego_hw_share = get_package_share_directory("hx_bringup_ego_multi_mission")
+    ego_hw_share = get_package_share_directory("bringup_ego_multi_mission")
     pointlio_share = get_package_share_directory("point_lio")
     livox_share = get_package_share_directory("livox_ros_driver2")
 
@@ -76,7 +76,7 @@ def generate_launch_description():
     )
 
     base_odom = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="rigid_odom_transform.py",
         name="pointlio_base_odom_transform",
         output="screen",
@@ -93,7 +93,7 @@ def generate_launch_description():
 
     # ========== Node 3: Point-LIO → PX4 视觉里程计桥接 ==========
     pointlio_to_px4 = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="pointlio_to_px4_visual_odom.py",
         name="pointlio_to_px4_visual_odom",
         output="screen",
@@ -211,7 +211,7 @@ def generate_launch_description():
     # 将 EGO 的 PositionCommand 转换为 PX4 NED 的 TrajectorySetpoint
     # 管理完整的起飞流程：prestream → 解锁 → Offboard → 起飞 → EGO 控制
     px4_bridge = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="ego_px4_bridge.py",
         name="ego_px4_bridge",
         output="screen",
@@ -260,7 +260,7 @@ def generate_launch_description():
     # 这是本包唯一的 /move_base_simple/goal 发布者。它等待无人机中心里程计、
     # 稳定起飞和 EGO 订阅者，然后逐点发布并等待位置/速度稳定。
     route_runner = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="multi_waypoint_runner.py",
         name="ego_multi_waypoint_runner",
         output="screen",
@@ -294,7 +294,7 @@ def generate_launch_description():
     )
 
     hardware_monitor = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="ego_hw_monitor.py",
         name="ego_hw_monitor",
         output="screen",
@@ -312,7 +312,7 @@ def generate_launch_description():
     )
 
     px4_dds_monitor = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="px4_dds_monitor.py",
         name="ego_px4_dds_monitor",
         output="screen",
@@ -320,7 +320,7 @@ def generate_launch_description():
     )
 
     px4_control_watchdog = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="px4_control_watchdog.py",
         name="ego_px4_control_watchdog",
         output="screen",
@@ -329,7 +329,7 @@ def generate_launch_description():
     )
 
     px4_pointlio_position_compare = Node(
-        package="hx_bringup_ego_multi_mission",
+        package="bringup_ego_multi_mission",
         executable="px4_pointlio_position_compare.py",
         name="ego_px4_pointlio_position_compare",
         output="screen",

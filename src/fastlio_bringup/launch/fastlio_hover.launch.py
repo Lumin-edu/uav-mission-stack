@@ -50,7 +50,7 @@ def generate_launch_description():
     )
 
     fastlio_bridge = Node(
-        package="hx_fastlio_bringup",
+        package="fastlio_bringup",
         executable="fastlio_to_px4_visual_odom.py",
         name="fastlio_to_px4_visual_odom",
         output="screen",
@@ -112,7 +112,7 @@ def generate_launch_description():
     )
 
     fixed_point_hover = Node(
-        package="hx_fastlio_bringup",
+        package="fastlio_bringup",
         executable="fixed_point_hover.py",
         name="fastlio_fixed_point_hover",
         output="screen",
@@ -136,7 +136,7 @@ def generate_launch_description():
     )
 
     px4_monitor = Node(
-        package="hx_fastlio_bringup",
+        package="fastlio_bringup",
         executable="px4_dds_monitor.py",
         name="fastlio_px4_dds_monitor",
         output="screen",
@@ -145,7 +145,7 @@ def generate_launch_description():
     )
 
     control_watchdog = Node(
-        package="hx_fastlio_bringup",
+        package="fastlio_bringup",
         executable="px4_control_watchdog.py",
         name="fastlio_px4_control_watchdog",
         output="screen",
@@ -154,7 +154,7 @@ def generate_launch_description():
     )
 
     position_compare = Node(
-        package="hx_fastlio_bringup",
+        package="fastlio_bringup",
         executable="px4_fastlio_position_compare.py",
         name="px4_fastlio_position_compare",
         output="screen",

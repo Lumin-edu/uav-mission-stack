@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(hx_bringup_pointlio_hover)
+project(bringup_pointlio_hover)
 
 find_package(ament_cmake REQUIRED)
 

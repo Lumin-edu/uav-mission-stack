@@ -20,7 +20,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
-    package_share = get_package_share_directory("hx_bringup_ego_mpc")
+    package_share = get_package_share_directory("bringup_ego_mpc")
     pointlio_share = get_package_share_directory("point_lio")
     livox_share = get_package_share_directory("livox_ros_driver2")
 
@@ -48,7 +48,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     base_odom_transform = Node(
-        package="hx_bringup_ego_mpc",
+        package="bringup_ego_mpc",
         executable="rigid_odom_transform.py",
         name="pointlio_base_odom_transform",
         output="screen",
@@ -64,7 +64,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     visual_odom = Node(
-        package="hx_bringup_ego_mpc",
+        package="bringup_ego_mpc",
         executable="pointlio_to_px4_visual_odom.py",
         name="pointlio_to_px4_visual_odom",
         output="screen",
@@ -150,7 +150,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     mpc = Node(
-        package="hx_bringup_ego_mpc",
+        package="bringup_ego_mpc",
         executable="ego_mpc_controller.py",
         name="ego_mpc_controller",
         output="screen",
@@ -187,7 +187,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     startup_goal = Node(
-        package="hx_bringup_ego_mpc",
+        package="bringup_ego_mpc",
         executable="startup_goal.py",
         name="ego_mpc_startup_goal",
         output="screen",
@@ -209,7 +209,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     monitor = Node(
-        package="hx_bringup_ego_mpc",
+        package="bringup_ego_mpc",
         executable="ego_hw_monitor.py",
         name="ego_mpc_hw_monitor",
         output="screen",
@@ -230,16 +230,16 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     px4_monitor = Node(
-        package="hx_bringup_ego_mpc", executable="px4_dds_monitor.py", name="ego_mpc_px4_dds_monitor",
+        package="bringup_ego_mpc", executable="px4_dds_monitor.py", name="ego_mpc_px4_dds_monitor",
         output="screen", condition=IfCondition(LaunchConfiguration("use_px4_monitor")),
     )
     watchdog = Node(
-        package="hx_bringup_ego_mpc", executable="px4_control_watchdog.py", name="ego_mpc_control_watchdog",
+        package="bringup_ego_mpc", executable="px4_control_watchdog.py", name="ego_mpc_control_watchdog",
         output="screen", condition=IfCondition(LaunchConfiguration("use_px4_control_watchdog")),
         parameters=[{"control_source": "ego_mpc_controller"}],
     )
     compare = Node(
-        package="hx_bringup_ego_mpc", executable="px4_pointlio_position_compare.py", name="ego_mpc_position_compare",
+        package="bringup_ego_mpc", executable="px4_pointlio_position_compare.py", name="ego_mpc_position_compare",
         output="screen", condition=IfCondition(LaunchConfiguration("use_position_compare")),
         parameters=[{"px4_topic": "/fmu/out/vehicle_local_position", "pointlio_topic": raw_odom, "print_rate": 2.0}],
     )

@@ -1,4 +1,4 @@
-# hx_fastlio_bringup
+# fastlio_bringup
 
 独立的 FAST-LIO + PX4 无人机定点悬停 bringup。这个目录不导入或调用其他
 bringup 包的脚本；Livox 驱动和 `MicroXRCEAgent` 由外部命令启动。
@@ -38,7 +38,7 @@ PX4 视觉里程计默认只融合位置，`publish_orientation` 默认为 `fals
 ```bash
 cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
-colcon build --packages-select hx_fastlio_bringup --symlink-install
+colcon build --packages-select fastlio_bringup --symlink-install
 source install/setup.bash
 ```
 
@@ -61,7 +61,7 @@ sudo MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600
 
 ```bash
 source install/setup.bash
-ros2 launch hx_fastlio_bringup fastlio_hover.launch.py \
+ros2 launch fastlio_bringup fastlio_hover.launch.py \
   use_fastlio:=true \
   use_visual_odom:=true \
   use_hover_control:=true \

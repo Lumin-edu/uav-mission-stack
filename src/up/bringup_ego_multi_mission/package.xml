@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd"?>
 <package format="3">
-  <name>hx_bringup_ego_multi_mission</name>
+  <name>bringup_ego_multi_mission</name>
   <version>0.1.0</version>
   <description>Hardware EGO multi-waypoint bringup using the verified Point-LIO and PX4 pipeline.</description>
 

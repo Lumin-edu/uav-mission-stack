@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(hx_bringup_ego_multi_mission)
+project(bringup_ego_multi_mission)
 
 find_package(ament_cmake REQUIRED)
 

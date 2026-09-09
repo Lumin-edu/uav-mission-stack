@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(hx_bringup_square_mission)
+project(bringup_square_mission)
 
 find_package(ament_cmake REQUIRED)
 

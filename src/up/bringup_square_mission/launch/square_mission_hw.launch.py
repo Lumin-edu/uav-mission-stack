@@ -83,7 +83,7 @@ def generate_launch_description():
 
     # ========== Node 2: Point-LIO -> PX4 视觉里程计桥接 ==========
     pointlio_to_px4_visual_odom = Node(
-        package="hx_bringup_square_mission",
+        package="bringup_square_mission",
         executable="pointlio_to_px4_visual_odom.py",
         output="screen",
         condition=IfCondition(use_pointlio_px4_visual_odom),
@@ -140,7 +140,7 @@ def generate_launch_description():
 
     # ========== Node 3: 正方形任务控制器（核心） ==========
     square_mission_controller = Node(
-        package="hx_bringup_square_mission",
+        package="bringup_square_mission",
         executable="square_mission_controller.py",
         output="screen",
         parameters=[
@@ -172,7 +172,7 @@ def generate_launch_description():
 
     # ========== Node 4: PX4 DDS 链路监控 ==========
     px4_dds_monitor = Node(
-        package="hx_bringup_square_mission",
+        package="bringup_square_mission",
         executable="px4_dds_monitor.py",
         output="screen",
         condition=IfCondition(use_px4_monitor),
@@ -180,7 +180,7 @@ def generate_launch_description():
 
     # ========== Node 5: PX4 Offboard 控制看门狗 ==========
     px4_control_watchdog = Node(
-        package="hx_bringup_square_mission",
+        package="bringup_square_mission",
         executable="px4_control_watchdog.py",
         output="screen",
         condition=IfCondition(use_px4_control_watchdog),
@@ -189,7 +189,7 @@ def generate_launch_description():
 
     # ========== Node 6: PX4/Point-LIO 位置对比调试 ==========
     px4_pointlio_position_compare = Node(
-        package="hx_bringup_square_mission",
+        package="bringup_square_mission",
         executable="px4_pointlio_position_compare.py",
         output="screen",
         condition=IfCondition(use_position_compare),

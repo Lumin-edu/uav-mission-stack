@@ -38,7 +38,7 @@ def generate_launch_description():
     )
 
     pointlio_to_px4_visual_odom = Node(
-        package="hx_bringup_full_mission",
+        package="bringup_full_mission",
         executable="pointlio_to_px4_visual_odom.py",
         output="screen",
         condition=IfCondition(use_pointlio_px4_visual_odom),
@@ -94,7 +94,7 @@ def generate_launch_description():
     )
 
     full_mission_controller = Node(
-        package="hx_bringup_full_mission",
+        package="bringup_full_mission",
         executable="full_mission_controller.py",
         output="screen",
         parameters=[
@@ -226,14 +226,14 @@ def generate_launch_description():
     )
 
     px4_dds_monitor = Node(
-        package="hx_bringup_full_mission",
+        package="bringup_full_mission",
         executable="px4_dds_monitor.py",
         output="screen",
         condition=IfCondition(use_px4_monitor),
     )
 
     px4_control_watchdog = Node(
-        package="hx_bringup_full_mission",
+        package="bringup_full_mission",
         executable="px4_control_watchdog.py",
         output="screen",
         condition=IfCondition(use_px4_control_watchdog),
@@ -241,7 +241,7 @@ def generate_launch_description():
     )
 
     px4_pointlio_position_compare = Node(
-        package="hx_bringup_full_mission",
+        package="bringup_full_mission",
         executable="px4_pointlio_position_compare.py",
         output="screen",
         condition=IfCondition(use_position_compare),

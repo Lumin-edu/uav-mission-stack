@@ -44,7 +44,7 @@ def generate_launch_description():
     )
 
     pointlio_to_px4_visual_odom = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="pointlio_to_px4_visual_odom.py",
         output="screen",
         condition=IfCondition(use_pointlio_px4_visual_odom),
@@ -107,7 +107,7 @@ def generate_launch_description():
     )
 
     fixed_point_hover = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="fixed_point_hover.py",
         output="screen",
         parameters=[
@@ -128,14 +128,14 @@ def generate_launch_description():
     )
 
     px4_dds_monitor = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_dds_monitor.py",
         output="screen",
         condition=IfCondition(use_px4_monitor),
     )
 
     px4_control_watchdog = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_control_watchdog.py",
         output="screen",
         condition=IfCondition(use_px4_control_watchdog),
@@ -143,7 +143,7 @@ def generate_launch_description():
     )
 
     px4_pointlio_position_compare = Node(
-        package="hx_bringup_pointlio_hover",
+        package="bringup_pointlio_hover",
         executable="px4_pointlio_position_compare.py",
         output="screen",
         condition=IfCondition(use_position_compare),

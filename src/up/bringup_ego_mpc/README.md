@@ -1,4 +1,4 @@
-# `hx_bringup_ego_mpc`
+# `bringup_ego_mpc`
 
 这是一个独立的实机 EGO + MPC 启动包。它不依赖 `bringup_ego`、
 `bringup_ego_multi_mission` 或其它自定义 bringup 包，也不会修改这些包。
@@ -91,9 +91,9 @@ EGO Bspline 消息
 cd /home/wu/sim-ego/uav-mission-stack
 source /opt/ros/humble/setup.bash
 python3 -m pip install --user 'osqp>=0.6.3,<2'
-colcon build --symlink-install --packages-select hx_bringup_ego_mpc
+colcon build --symlink-install --packages-select bringup_ego_mpc
 source install/setup.bash
-ros2 launch hx_bringup_ego_mpc ego_mpc_hw.launch.py \
+ros2 launch bringup_ego_mpc ego_mpc_hw.launch.py \
   output_enabled:=true \
   hardware_confirmation:=ENABLE_PX4_OUTPUT
 ```
@@ -103,7 +103,7 @@ MPC 和 EGO planner 的速度、加速度、jerk、预测时域和求解器参�
 启动时可以替换配置文件，例如使用 5 m/s 模板：
 
 ```bash
-ros2 launch hx_bringup_ego_mpc ego_mpc_hw.launch.py \
+ros2 launch bringup_ego_mpc ego_mpc_hw.launch.py \
   mpc_config:=/home/wu/sim-ego/uav-mission-stack/src/up/bringup_ego_mpc/config/mpc_params_5ms.yaml
 ```
 

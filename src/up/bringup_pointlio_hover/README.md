@@ -1,4 +1,4 @@
-# hx_bringup_pointlio_hover
+# bringup_pointlio_hover
 
 独立实机定点悬停 bringup，只保留悬停需要的节点：
 
@@ -64,7 +64,7 @@ odom -> base_link       Point-LIO 动态发布，base_link 表示 IMU 测量原�
 ```bash
 cd /home/wu/sim-ego
 source /opt/ros/humble/setup.bash
-colcon build --packages-select hx_bringup_pointlio_hover --symlink-install
+colcon build --packages-select bringup_pointlio_hover --symlink-install
 source install/setup.bash
 ```
 
@@ -79,7 +79,7 @@ sudo MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600
 sudo ifconfig enp2s0 192.168.1.50
 
 source install/setup.bash
-ros2 launch hx_bringup_pointlio_hover hover_hw.launch.py \
+ros2 launch bringup_pointlio_hover hover_hw.launch.py \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
   use_hover_control:=true \
