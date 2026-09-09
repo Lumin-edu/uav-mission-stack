@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+"""无 ROS 依赖的刚体变换工具，统一使用 ROS ``xyzw`` 四元数顺序。
+
+本文件专门处理 Point-LIO 的 IMU 原点到无人机机体中心的固定杆臂外参。所有输入
+都会先检查维数和有限性，避免无效位姿进入控制和 PX4 视觉里程计链路。
+"""
+
 import math
 from typing import Sequence
 
@@ -10,6 +16,7 @@ Pose = tuple[Vector3, Quaternion]
 
 
 def _finite_vector(values: Sequence[float], size: int, name: str) -> tuple[float, ...]:
+    """将输入转为固定长度浮点元组，并拒绝 NaN 和无穷值。"""
     if len(values) != size:
         raise ValueError(f"{name} must contain {size} values")
     result = tuple(float(value) for value in values)
@@ -19,6 +26,7 @@ def _finite_vector(values: Sequence[float], size: int, name: str) -> tuple[float
 
 
 def normalize_quaternion(values: Sequence[float]) -> Quaternion:
+    """归一化 ROS ``xyzw`` 四元数；零范数四元数没有有效旋转含义。"""
     x, y, z, w = _finite_vector(values, 4, "quaternion")
     norm = math.sqrt(x * x + y * y + z * z + w * w)
     if norm < 1e-12:
@@ -27,6 +35,7 @@ def normalize_quaternion(values: Sequence[float]) -> Quaternion:
 
 
 def quaternion_multiply(lhs: Sequence[float], rhs: Sequence[float]) -> Quaternion:
+    """计算 ``lhs * rhs``，对应先应用 rhs、再应用 lhs 的旋转复合。"""
     x1, y1, z1, w1 = normalize_quaternion(lhs)
     x2, y2, z2, w2 = normalize_quaternion(rhs)
     return normalize_quaternion(
@@ -39,24 +48,12 @@ def quaternion_multiply(lhs: Sequence[float], rhs: Sequence[float]) -> Quaternio
     )
 
 
-def ros_flu_to_px4_frd_quaternion(values: Sequence[float]) -> Quaternion:
-    """Convert a ROS FLU orientation to the equivalent PX4 FRD/NED basis.
-
-    ROS body coordinates use Forward-Left-Up while PX4 body coordinates use
-    Forward-Right-Down.  The basis change is a 180-degree rotation about X.
-    Conjugating by that rotation preserves roll/pitch and flips the signs of
-    yaw components without discarding vehicle tilt.
-    """
-    basis = (1.0, 0.0, 0.0, 0.0)
-    normalized = normalize_quaternion(values)
-    return quaternion_multiply(quaternion_multiply(basis, normalized), basis)
-
-
 def rotate_vector(quaternion: Sequence[float], vector: Sequence[float]) -> Vector3:
+    """使用 ROS ``xyzw`` 四元数旋转三维向量。"""
     qx, qy, qz, qw = normalize_quaternion(quaternion)
     vx, vy, vz = _finite_vector(vector, 3, "vector")
 
-    # q * [v, 0] * q^-1, expanded to avoid temporary quaternion objects.
+    # 展开计算 q * [v, 0] * q^-1，避免构造临时四元数对象。
     tx = 2.0 * (qy * vz - qz * vy)
     ty = 2.0 * (qz * vx - qx * vz)
     tz = 2.0 * (qx * vy - qy * vx)
@@ -73,14 +70,14 @@ def compose_pose(
     parent_child_translation: Sequence[float],
     parent_child_rotation: Sequence[float],
 ) -> Pose:
-    """Return T_world_child = T_world_parent * T_parent_child using ROS xyzw quaternions."""
+    """计算 ``T_world_child = T_world_parent * T_parent_child``（ROS xyzw）。"""
     px, py, pz = _finite_vector(world_parent_position, 3, "world_parent_position")
-    rotated_translation = rotate_vector(
-        world_parent_orientation, parent_child_translation
-    )
-    orientation = quaternion_multiply(
-        world_parent_orientation, parent_child_rotation
-    )
+
+    # 杆臂平移定义在父坐标系（此处通常为 MID360 IMU 的 base_link）中。
+    # 必须先按父坐标系当前世界姿态把它旋转到 world，再与世界位置相加；若直接
+    # 逐轴相加，飞行器滚转或俯仰时会产生姿态相关的位置误差。
+    rotated_translation = rotate_vector(world_parent_orientation, parent_child_translation)
+    orientation = quaternion_multiply(world_parent_orientation, parent_child_rotation)
     return (
         (
             px + rotated_translation[0],

@@ -2,13 +2,7 @@
 """
 EGO 硬件管线诊断监控节点。
 
-监控 EGO 自主避障完整数据链路的状态：
-  1. 杆臂补偿后的无人机中心里程计 (/ego/odom_base)
-  2. Point-LIO 原始世界系点云 (/cloud_registered)
-  3. EGO 轨迹指令 (/ego/position_cmd)
-  4. PX4 视觉里程计输入 (/fmu/in/vehicle_visual_odometry)
-  5. PX4 本地位置 (/fmu/out/vehicle_local_position)
-  6. PX4 飞控状态 (/fmu/out/vehicle_status)
+监控 EGO 自主避障、MPC 输出和 PX4 状态的完整数据链路。
 
 每 1 秒生成一次 DiagnosticArray 诊断报告，检查数据新鲜度和有效性。
 """
@@ -19,11 +13,19 @@ from typing import Optional
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from nav_msgs.msg import Odometry
-from px4_msgs.msg import VehicleLocalPosition, VehicleOdometry, VehicleStatus
+from px4_msgs.msg import (
+    OffboardControlMode,
+    TrajectorySetpoint,
+    VehicleLocalPosition,
+    VehicleOdometry,
+    VehicleStatus,
+)
 from quadrotor_msgs.msg import PositionCommand
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
+
+from traj_utils.msg import Bspline
 
 
 class EgoHardwareMonitor(Node):
@@ -44,12 +46,21 @@ class EgoHardwareMonitor(Node):
         self.command_topic = str(
             self.declare_parameter("command_topic", "/ego/position_cmd").value
         )
+        self.bspline_topic = str(
+            self.declare_parameter("bspline_topic", "/ego/planning/bspline").value
+        )
         self.max_odom_age = float(self.declare_parameter("max_odom_age_sec", 0.30).value)
         self.max_cloud_age = float(self.declare_parameter("max_cloud_age_sec", 0.50).value)
         self.max_command_age = float(
             self.declare_parameter("max_command_age_sec", 0.30).value
         )
+        self.max_bspline_age = float(
+            self.declare_parameter("max_bspline_age_sec", 2.0).value
+        )
         self.max_px4_age = float(self.declare_parameter("max_px4_age_sec", 0.50).value)
+        self.max_control_age = float(
+            self.declare_parameter("max_control_age_sec", 0.30).value
+        )
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -67,6 +78,9 @@ class EgoHardwareMonitor(Node):
         self.last_odom_sec: Optional[float] = None
         self.last_cloud_sec: Optional[float] = None
         self.last_command_sec: Optional[float] = None
+        self.last_bspline_sec: Optional[float] = None
+        self.last_control_mode_sec: Optional[float] = None
+        self.last_control_setpoint_sec: Optional[float] = None
         self.last_visual_odom_sec: Optional[float] = None
         self.last_px4_sec: Optional[float] = None
         self.last_status_sec: Optional[float] = None
@@ -79,6 +93,19 @@ class EgoHardwareMonitor(Node):
         self.create_subscription(PointCloud2, self.cloud_topic, self.cloud_callback, sensor_qos)
         self.create_subscription(
             PositionCommand, self.command_topic, self.command_callback, sensor_qos
+        )
+        self.create_subscription(Bspline, self.bspline_topic, self.bspline_callback, sensor_qos)
+        self.create_subscription(
+            OffboardControlMode,
+            "/fmu/in/offboard_control_mode",
+            self.control_mode_callback,
+            px4_qos,
+        )
+        self.create_subscription(
+            TrajectorySetpoint,
+            "/fmu/in/trajectory_setpoint",
+            self.control_setpoint_callback,
+            px4_qos,
         )
         self.create_subscription(
             VehicleOdometry,
@@ -119,6 +146,15 @@ class EgoHardwareMonitor(Node):
     def command_callback(self, _msg: PositionCommand) -> None:
         self.last_command_sec = self.mark_now()
 
+    def bspline_callback(self, _msg: Bspline) -> None:
+        self.last_bspline_sec = self.mark_now()
+
+    def control_mode_callback(self, _msg: OffboardControlMode) -> None:
+        self.last_control_mode_sec = self.mark_now()
+
+    def control_setpoint_callback(self, _msg: TrajectorySetpoint) -> None:
+        self.last_control_setpoint_sec = self.mark_now()
+
     def visual_odom_callback(self, _msg: VehicleOdometry) -> None:
         self.last_visual_odom_sec = self.mark_now()
 
@@ -145,16 +181,29 @@ class EgoHardwareMonitor(Node):
         odom_age = self.age(self.last_odom_sec)
         cloud_age = self.age(self.last_cloud_sec)
         command_age = self.age(self.last_command_sec)
+        bspline_age = self.age(self.last_bspline_sec)
+        control_mode_age = self.age(self.last_control_mode_sec)
+        control_setpoint_age = self.age(self.last_control_setpoint_sec)
         visual_odom_age = self.age(self.last_visual_odom_sec)
         px4_age = self.age(self.last_px4_sec)
         status_age = self.age(self.last_status_sec)
         control_publishers = self.control_publisher_count()
 
-        # 9 项检查：6 项数据新鲜度 + 2 项 PX4 有效性 + 1 项发布者数量
+        # Stream ages, PX4 validity flags, and exclusive ownership of the PX4
+        # trajectory setpoint topic are checked here.
         checks = [
             (odom_age <= self.max_odom_age, "EGO base-center odometry is missing or stale"),
             (cloud_age <= self.max_cloud_age, "registered obstacle cloud is missing or stale"),
             (command_age <= self.max_command_age, "EGO trajectory command is missing or stale"),
+            (bspline_age <= self.max_bspline_age, "EGO B-spline is missing or stale"),
+            (
+                control_mode_age <= self.max_control_age,
+                "PX4 OffboardControlMode is missing or stale",
+            ),
+            (
+                control_setpoint_age <= self.max_control_age,
+                "PX4 TrajectorySetpoint is missing or stale",
+            ),
             (visual_odom_age <= self.max_px4_age, "PX4 visual odometry input is missing or stale"),
             (px4_age <= self.max_px4_age, "PX4 local position is missing or stale"),
             (status_age <= self.max_px4_age, "PX4 vehicle status is missing or stale"),
@@ -169,6 +218,9 @@ class EgoHardwareMonitor(Node):
             self.kv("odom_age_sec", f"{odom_age:.3f}"),
             self.kv("cloud_age_sec", f"{cloud_age:.3f}"),
             self.kv("command_age_sec", f"{command_age:.3f}"),
+            self.kv("bspline_age_sec", f"{bspline_age:.3f}"),
+            self.kv("control_mode_age_sec", f"{control_mode_age:.3f}"),
+            self.kv("control_setpoint_age_sec", f"{control_setpoint_age:.3f}"),
             self.kv("visual_odom_age_sec", f"{visual_odom_age:.3f}"),
             self.kv("px4_position_age_sec", f"{px4_age:.3f}"),
             self.kv("px4_status_age_sec", f"{status_age:.3f}"),

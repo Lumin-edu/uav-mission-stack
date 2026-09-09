@@ -8,9 +8,7 @@ Offboard control.
   -> Point-LIO /odom + /cloud_registered
   -> odom -> base_link (MID360 IMU)
   -> base_link -> base [-0.011, -0.02329, -0.05588]
-  -> planner fusion: base-center x/y/orientation + PX4 range-aided z
-  -> cloud z alignment using the same height correction
-  -> /ego/odom_fused + /ego/cloud_registered_fused
+  -> /ego/odom_base (aircraft center) + raw /cloud_registered
   -> EGO /ego/position_cmd (100 Hz B-spline samples)
   -> PX4 TrajectorySetpoint
 ```
@@ -31,42 +29,16 @@ q_base_link_base_xyzw = [0, 0, 0, 1]
 
 The static `base_link -> base` publisher only completes the TF tree; neither
 numeric adapter reads that TF, so the lever arm is applied exactly once in each
-independent output path. EGO, its obstacle map, the startup-goal gate, and the
-EGO-to-PX4 controller consume `/ego/odom_fused` with `child_frame_id=base` and
-`/ego/cloud_registered_fused`.
+independent output path. The planning chain consumes `/ego/odom_base`, which is
+the Point-LIO pose transformed from the MID-360 IMU origin to the aircraft
+center. The obstacle map consumes the original `/cloud_registered` topic, and
+its coordinates are not shifted or vertically re-aligned. Point-LIO z is the
+only planner height source.
 
-The planner-only fusion path never feeds back into PX4 visual odometry. The PX4
-bridge continues to consume raw `/odom`, applies its own base-center correction,
-then runs the previously validated ROS-to-NED conversion.
-
-On flat ground, planner height is computed from PX4 NED height while retaining
-the initial corrected base-center ROS-up origin:
-
-```text
-raw_base_pose = raw_base_link_pose * T_base_link_base
-ego_z = initial_base_z - (px4_z - initial_px4_z)
-ego_vz = -px4_vz
-cloud_z += ego_z - current_raw_base_z
-```
-
-`/cloud_registered` already contains world-frame obstacle points, so it is not
-translated in x/y. Only z is shifted by exactly the same difference between
-the PX4-derived base height and the current raw base height. This keeps the
-aircraft center and obstacles in one vertical reference without moving the map
-sideways when aircraft attitude changes.
-
-The fusion health gate requires a valid range sensor by default. Before flight,
-verify PX4 1.14 is configured for horizontal-only external vision and range
-height:
-
-```text
-EKF2_EV_CTRL = 1
-EKF2_HGT_REF = 2
-EKF2_RNG_CTRL = 2
-```
-
-This range-height mode is restricted to a flat surface. Do not use it above
-tables, steps, ramps, or changing terrain.
+The PX4 visual-odometry bridge consumes raw `/odom` and applies the same
+base-link-to-base transform internally before the validated ROS-to-NED
+conversion. This keeps the numeric bridge independent from the `/ego/odom_base`
+topic and prevents double application of the lever arm.
 
 ## Control contract
 
@@ -90,7 +62,7 @@ control. If an EGO command is temporarily unavailable, the bridge continuously
 holds the last safe PX4 position.
 
 Optional `auto_land_after_goal:=true` enables `auto_land_after_goal.py`. It
-uses the same `/move_base_simple/goal` and `/ego/odom_fused` base-center pose,
+uses the same `/move_base_simple/goal` and the compensated `/ego/odom_base` pose,
 waits for position and velocity to remain within tolerance, then sends
 `VEHICLE_CMD_NAV_LAND`:
 
@@ -125,8 +97,8 @@ ego_y_left = -task_x_right
 ego_z_up = task_z_up
 ```
 
-The goal, `/ego/odom_fused`, and `/ego/cloud_registered_fused` therefore use the
-same EGO world frame. EGO plans the position of `base`, not the IMU origin.
+The goal, `/odom`, and `/cloud_registered` therefore use the same Point-LIO
+world frame. EGO consumes the estimator output directly.
 
 The bridge captures the initial PX4 heading and converts the task frame to PX4
 NED (`x=forward, y=right, z=down`). By default it also locks commanded yaw to
@@ -171,12 +143,10 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
 ros2 topic hz /livox/lidar
 ros2 topic hz /livox/imu
 ros2 topic hz /odom
+ros2 topic hz /ego/odom_base
 ros2 topic hz /cloud_registered
-ros2 topic hz /ego/odom_fused
-ros2 topic hz /ego/cloud_registered_fused
-ros2 topic echo /ego/odom_fused --once
+ros2 topic echo /odom --once
 ros2 run tf2_ros tf2_echo base_link base
-ros2 topic echo /ego/height_fusion_healthy --once
 ros2 topic hz /fmu/in/vehicle_visual_odometry
 ros2 topic hz /ego/position_cmd
 ros2 topic echo /ego_hw/diagnostics --once
@@ -203,7 +173,6 @@ ros2 launch hx_bringup_ego ego_avoidance_hw.launch.py \
   use_px4_monitor:=true \
   use_px4_control_watchdog:=true \
   use_position_compare:=true \
-  require_rangefinder_height:=true \
   takeoff_before_ego:=true \
   takeoff_altitude:=0.40 \
   goal_x:=0.0 goal_y:=2.0 goal_z:=0.40 \

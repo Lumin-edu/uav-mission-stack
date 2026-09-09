@@ -9,7 +9,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE_ROOT / "scripts"))
 
-from rigid_transform import compose_pose, rotate_vector
+from rigid_transform import compose_pose, ros_flu_to_px4_frd_quaternion, rotate_vector
 
 
 BODY_TO_BASE = (-0.011, -0.02329, -0.05588)
@@ -25,6 +25,17 @@ class RigidTransformTest(unittest.TestCase):
         self.assertEqual(len(actual), len(expected))
         for actual_value, expected_value in zip(actual, expected):
             self.assertAlmostEqual(actual_value, expected_value, delta=1e-9)
+
+    def assert_quaternion_equivalent(self, actual, expected) -> None:
+        direct = all(
+            abs(actual_value - expected_value) <= 1e-9
+            for actual_value, expected_value in zip(actual, expected)
+        )
+        negated = all(
+            abs(actual_value + expected_value) <= 1e-9
+            for actual_value, expected_value in zip(actual, expected)
+        )
+        self.assertTrue(direct or negated)
 
     def test_level_pose_applies_body_to_base_offset_with_correct_sign(self) -> None:
         position, orientation = compose_pose(
@@ -54,6 +65,14 @@ class RigidTransformTest(unittest.TestCase):
 
         self.assert_vector_close(orientation, (0.0, 0.0, 1.0, 0.0))
 
+    def test_flu_to_frd_preserves_tilt_and_flips_yaw_basis(self) -> None:
+        roll_pitch = ros_flu_to_px4_frd_quaternion(ROLL_90)
+        self.assert_quaternion_equivalent(roll_pitch, ROLL_90)
+        yaw = ros_flu_to_px4_frd_quaternion(YAW_90)
+        self.assert_quaternion_equivalent(
+            yaw, (0.0, 0.0, -math.sin(HALF_90), math.cos(HALF_90))
+        )
+
     def test_zero_quaternion_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "norm is zero"):
             compose_pose(
@@ -68,6 +87,8 @@ class RigidTransformTest(unittest.TestCase):
 
         self.assertIn('"/Odometry"', text)
         self.assertIn('"body_to_base_translation"', text)
+        self.assertIn('"fastlio_world_frame", "camera_init"', text)
+        self.assertIn('"publish_orientation", False', text)
         self.assertNotIn("bringup_" + "point" + "lio_hover", text)
         self.assertNotIn("point" + "lio_to_px4", text)
 
@@ -78,7 +99,8 @@ class RigidTransformTest(unittest.TestCase):
         self.assertIn('"auto_arm", False', text)
         self.assertIn("2.0 * self.control_rate_hz", text)
         self.assertIn("msg.position = True", text)
-        self.assertIn("msg.xy_valid and msg.z_valid", text)
+        self.assertIn("msg.xy_valid", text)
+        self.assertIn("msg.z_valid", text)
 
 
 if __name__ == "__main__":

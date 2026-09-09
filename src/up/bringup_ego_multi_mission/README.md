@@ -9,8 +9,8 @@
 ```text
 MID-360 -> Point-LIO /odom + /cloud_registered
          -> base_link(IMU) 到 base(机体中心)补偿
-         -> PX4 视觉里程计 + 高度融合
-         -> /ego/odom_fused + /ego/cloud_registered_fused
+         -> PX4 视觉里程计
+         -> /ego/odom_base + raw /cloud_registered (Point-LIO z used directly)
          -> EGO 局部规划
          -> /ego/position_cmd -> PX4 TrajectorySetpoint
 ```
@@ -62,14 +62,12 @@ ros2 launch hx_bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
   use_livox_driver:=true \
   use_pointlio:=true \
   use_pointlio_px4_visual_odom:=true \
-  require_rangefinder_height:=false \
   output_enabled:=false \
   auto_arm:=false \
   start_with_waypoints:=true
 ```
 
-确认 `/ego/odom_fused`、`/ego/cloud_registered_fused`、
-`/ego/height_fusion_healthy` 和 `/ego/position_cmd` 正常后，经过无桨检查再
+确认 `/odom`、`/ego/odom_base`、`/cloud_registered` 和 `/ego/position_cmd` 正常后，经过无桨检查再
 开启 PX4 输出：
 
 ```bash

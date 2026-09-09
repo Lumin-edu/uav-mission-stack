@@ -9,7 +9,12 @@ from px4_msgs.msg import TimesyncStatus, VehicleLocalPosition, VehicleOdometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
-from rigid_transform import compose_pose, normalize_quaternion
+from rigid_transform import (
+    compose_pose,
+    normalize_quaternion,
+    quaternion_multiply,
+    ros_flu_to_px4_frd_quaternion,
+)
 
 
 class FastlioToPx4VisualOdom(Node):
@@ -37,6 +42,9 @@ class FastlioToPx4VisualOdom(Node):
         self.fastlio_pose_frame = str(
             self.declare_parameter("fastlio_pose_frame", "body").value
         )
+        self.fastlio_world_frame = str(
+            self.declare_parameter("fastlio_world_frame", "camera_init").value
+        )
         self.vehicle_frame = str(self.declare_parameter("vehicle_frame", "base").value)
 
         self.body_to_base_translation = self._vector_parameter(
@@ -56,15 +64,11 @@ class FastlioToPx4VisualOdom(Node):
         self.use_px4_reference = bool(
             self.declare_parameter("use_px4_reference", False).value
         )
-        self.max_px4_reference_abs_z = float(
-            self.declare_parameter("max_px4_reference_abs_z", 20.0).value
+        self.max_px4_reference_abs_z = self._positive_parameter(
+            "max_px4_reference_abs_z", 20.0
         )
-        self.max_output_abs_z = float(
-            self.declare_parameter("max_output_abs_z", 20.0).value
-        )
-        self.max_position_jump = float(
-            self.declare_parameter("max_position_jump", 3.0).value
-        )
+        self.max_output_abs_z = self._positive_parameter("max_output_abs_z", 20.0)
+        self.max_position_jump = self._positive_parameter("max_position_jump", 3.0)
         self.position_variance = float(
             self.declare_parameter("position_variance", 0.04).value
         )
@@ -75,7 +79,7 @@ class FastlioToPx4VisualOdom(Node):
             self.declare_parameter("velocity_variance", 0.25).value
         )
         self.publish_orientation = bool(
-            self.declare_parameter("publish_orientation", True).value
+            self.declare_parameter("publish_orientation", False).value
         )
         self.publish_velocity = bool(
             self.declare_parameter("publish_velocity", False).value
@@ -168,6 +172,7 @@ class FastlioToPx4VisualOdom(Node):
             "FAST-LIO -> PX4 visual odometry bridge active: "
             f"fastlio={self.fastlio_topic}, px4_local={self.px4_local_topic}, "
             f"out={self.output_topic}, pose_frame={self.fastlio_pose_frame}, "
+            f"world_frame={self.fastlio_world_frame}, "
             f"vehicle_frame={self.vehicle_frame}, "
             f"body_to_base={tuple(round(value, 5) for value in self.body_to_base_translation)}, "
             f"publish_orientation={self.publish_orientation}, "
@@ -181,6 +186,12 @@ class FastlioToPx4VisualOdom(Node):
         if len(values) != size or not all(math.isfinite(value) for value in values):
             raise ValueError(f"{name} must contain {size} finite values")
         return values
+
+    def _positive_parameter(self, name: str, default: float) -> float:
+        value = float(self.declare_parameter(name, default).value)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be a finite positive value")
+        return value
 
     def now_us(self) -> int:
         return int(self.get_clock().now().nanoseconds / 1000)
@@ -305,6 +316,18 @@ class FastlioToPx4VisualOdom(Node):
     def fastlio_body_pose_to_base(
         self, msg: Odometry
     ) -> Optional[tuple[tuple[float, float, float], tuple[float, float, float, float]]]:
+        if self.fastlio_world_frame and msg.header.frame_id != self.fastlio_world_frame:
+            self.warn_throttled(
+                "Skipping FAST-LIO odometry with unexpected world frame: "
+                f"'{msg.header.frame_id}' (expected '{self.fastlio_world_frame}')."
+            )
+            return None
+        if self.fastlio_pose_frame and msg.child_frame_id != self.fastlio_pose_frame:
+            self.warn_throttled(
+                "Skipping FAST-LIO odometry with unexpected pose frame: "
+                f"'{msg.child_frame_id}' (expected '{self.fastlio_pose_frame}')."
+            )
+            return None
         position = msg.pose.pose.position
         orientation = msg.pose.pose.orientation
         try:
@@ -382,14 +405,19 @@ class FastlioToPx4VisualOdom(Node):
             mapped[2],
         )
 
-    def yaw_to_px4_quaternion(self, fastlio_yaw: float) -> list[float]:
-        yaw = self.wrap_angle(
-            self.yaw_sign * fastlio_yaw
-            + self.yaw_offset_world_to_px4
-            + self.yaw_offset
-        )
-        half = 0.5 * yaw
-        return [math.cos(half), 0.0, 0.0, math.sin(half)]
+    def orientation_to_px4_quaternion(
+        self, fastlio_orientation: tuple[float, float, float, float]
+    ) -> list[float]:
+        """Return PX4's [w, x, y, z] quaternion without dropping tilt."""
+        converted = ros_flu_to_px4_frd_quaternion(fastlio_orientation)
+        yaw_adjustment = self.yaw_offset_world_to_px4 + self.yaw_offset
+        if abs(yaw_adjustment) > 1e-12:
+            half = 0.5 * yaw_adjustment
+            converted = quaternion_multiply(
+                (0.0, 0.0, math.sin(half), math.cos(half)), converted
+            )
+        x, y, z, w = converted
+        return [w, x, y, z]
 
     def should_publish(self) -> bool:
         if self.publish_rate_limit <= 0.0:
@@ -421,9 +449,7 @@ class FastlioToPx4VisualOdom(Node):
         output.position = [float(value) for value in position]
 
         if self.publish_orientation:
-            output.q = self.yaw_to_px4_quaternion(
-                self.quaternion_to_yaw(*vehicle_orientation)
-            )
+            output.q = self.orientation_to_px4_quaternion(vehicle_orientation)
         else:
             output.q = [float("nan")] * 4
 

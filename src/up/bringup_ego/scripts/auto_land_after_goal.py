@@ -4,7 +4,7 @@
 这个节点只是“到点检测器 + 降落状态协调器”，不是第二个飞行控制器：
 
 1. 订阅 ``/move_base_simple/goal``，记录 EGO 当前最终目标；
-2. 订阅 ``/ego/odom_fused``，用补偿后的 ``base`` 机体中心位姿判断是否到点；
+2. 订阅杆臂补偿后的 ``/ego/odom_base``，用无人机中心位姿判断是否到点；
 3. 位置误差和速度连续满足阈值后，发送一次 ``VEHICLE_CMD_NAV_LAND``；
 4. 降落过程中发布 ``/ego/landing_requested=true``，通知桥接节点不要重进 Offboard；
 5. 等 PX4 明确报告 ``landed=true`` 后发布 ``/ego/landing_complete=true``；
@@ -56,7 +56,7 @@ class AutoLandAfterGoal(Node):
         # 这样启动阶段即使当前位置恰好落在目标容差内，也不会在起飞前请求降落。
         self.require_takeoff_ready = bool(self.declare_parameter("require_takeoff_ready", True).value)
         self.goal_topic = str(self.declare_parameter("goal_topic", "/move_base_simple/goal").value)
-        self.odom_topic = str(self.declare_parameter("odom_topic", "/ego/odom_fused").value)
+        self.odom_topic = str(self.declare_parameter("odom_topic", "/ego/odom_base").value)
         self.status_topic = str(
             self.declare_parameter("vehicle_status_topic", "/fmu/out/vehicle_status").value
         )
@@ -141,8 +141,7 @@ class AutoLandAfterGoal(Node):
             Bool, self.landing_complete_topic, signal_qos
         )
         # goal 与 odom 必须处于同一个 EGO/odom 世界坐标系。
-        # planner_odom_topic 在 launch 中传入 /ego/odom_fused，其 child_frame_id 是 base，
-        # 所以这里比较的是无人机机体中心，而不是 MID360 IMU 原点。
+        # launch passes the Point-LIO odometry topic; compare its position and velocity directly.
         self.create_subscription(PoseStamped, self.goal_topic, self.goal_callback, sensor_qos)
         self.create_subscription(Odometry, self.odom_topic, self.odom_callback, sensor_qos)
         self.create_subscription(VehicleStatus, self.status_topic, self.status_callback, px4_qos)
@@ -288,7 +287,7 @@ class AutoLandAfterGoal(Node):
         # PX4 的 VEHICLE_CMD_NAV_LAND 会在 Commander 中切换到 AUTO_LAND，
         # Navigator 随后将“当前全局位置”保存为降落点并保持该 XY 下降。
         # 因此这里不填写起飞点、Home 点或返航点；param5/6/7 为 0 不表示回到起飞点。
-        # 由于本函数只会在 /ego/odom_fused 已经稳定到目标时调用，命令接受瞬间的
+        # 由于本函数只会在无人机中心里程计已经稳定到目标时调用，命令接受瞬间的
         # 当前 XY 就是目标点 XY，也就是“目标点正下方”降落。
         # 不在此处生成下降位置/速度设定值，避免出现第二个轨迹控制源。
         msg.param1 = 0.0

@@ -1,0 +1,31 @@
+# 5 m/s profile template. Validate acceleration, jerk, tilt and thrust limits
+# on the aircraft before use. This file is not a flight-readiness guarantee.
+ego_mpc_controller:
+  ros__parameters:
+    max_velocity: 5.0
+    max_acceleration: 2.0
+    max_horizontal_acceleration: 1.5
+    max_vertical_acceleration: 1.0
+    max_jerk: 4.0
+    control_rate_hz: 50.0
+    mpc_dt: 0.05
+    mpc_horizon: 30
+    position_weight: 12.0
+    velocity_weight: 3.0
+    acceleration_weight: 0.2
+    jerk_weight: 0.5
+    terminal_weight: 2.0
+    solver_eps_abs: 0.0001
+    solver_eps_rel: 0.0001
+    solver_max_iter: 4000
+    solver_time_limit_ms: 18.0
+    solver_constraint_tolerance: 0.0005
+
+ego_planner:
+  ros__parameters:
+    "manager/max_vel": 5.0
+    "manager/max_acc": 2.0
+    "optimization/max_vel": 5.0
+    "optimization/max_acc": 2.0
+    "bspline/limit_vel": 5.0
+    "bspline/limit_acc": 2.0

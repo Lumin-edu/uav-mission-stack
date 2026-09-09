@@ -223,7 +223,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", help="YAML file containing a waypoints list")
     parser.add_argument("--topic", default="/move_base_simple/goal")
-    parser.add_argument("--odom-topic", default="/ego/odom_fused")
+    parser.add_argument("--odom-topic", default="/ego/odom_base")
     parser.add_argument("--takeoff-ready-topic", default="/ego/takeoff_ready")
     parser.add_argument("--ready-timeout", type=float, default=120.0)
     parser.add_argument("--odom-timeout", type=float, default=0.50)

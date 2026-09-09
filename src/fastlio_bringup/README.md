@@ -30,6 +30,9 @@ body_to_base_rotation_xyzw = [0, 0, 0, 1]
 默认坐标转换为 `(x, y, z) -> (N, E, D) = (x, -y, -z)`。补偿平移会随当前姿态
 旋转，不能直接把固定杆臂量加到世界坐标。
 
+PX4 视觉里程计默认只融合位置，`publish_orientation` 默认为 `false`；如果需要
+融合姿态，可显式开启，桥接节点会发布完整的 FLU→FRD/NED 四元数，而不是仅发布偏航。
+
 ## 编译
 
 ```bash

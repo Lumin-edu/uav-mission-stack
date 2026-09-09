@@ -32,6 +32,12 @@ class FixedPointHover(Node):
         self.reference_capture_delay_sec = float(
             self.declare_parameter("reference_capture_delay_sec", 3.0).value
         )
+        self.max_local_position_age_sec = self._positive_parameter(
+            "max_local_position_age_sec", 0.5
+        )
+        self.max_vehicle_status_age_sec = self._positive_parameter(
+            "max_vehicle_status_age_sec", 0.5
+        )
         self.control_rate_hz = float(
             self.declare_parameter("control_rate_hz", 50.0).value
         )
@@ -62,6 +68,8 @@ class FixedPointHover(Node):
 
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
+        self.last_local_position_receive_sec = None
+        self.last_vehicle_status_receive_sec = None
         self.create_subscription(
             VehicleLocalPosition,
             self.vehicle_local_position_topic,
@@ -78,6 +86,7 @@ class FixedPointHover(Node):
         self.last_offboard_request_time = 0
         self.waiting_for_manual_arm_logged = False
         self.waiting_for_reference_logged = False
+        self.waiting_for_fresh_state_logged = False
         self.hover_reference_captured = False
         self.reference_capture_ready_sec = (
             self.now_sec() + self.reference_capture_delay_sec
@@ -94,9 +103,39 @@ class FixedPointHover(Node):
     def now_sec(self) -> float:
         return self.get_clock().now().nanoseconds / 1e9
 
+    def _positive_parameter(self, name: str, default: float) -> float:
+        value = float(self.declare_parameter(name, default).value)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be a finite positive value")
+        return value
+
+    @staticmethod
+    def local_position_is_valid(msg: VehicleLocalPosition) -> bool:
+        return bool(
+            msg.xy_valid
+            and msg.z_valid
+            and all(math.isfinite(float(value)) for value in (msg.x, msg.y, msg.z))
+        )
+
+    def local_position_is_fresh(self) -> bool:
+        return bool(
+            self.last_local_position_receive_sec is not None
+            and self.now_sec() - self.last_local_position_receive_sec
+            <= self.max_local_position_age_sec
+            and self.local_position_is_valid(self.vehicle_local_position)
+        )
+
+    def vehicle_status_is_fresh(self) -> bool:
+        return bool(
+            self.last_vehicle_status_receive_sec is not None
+            and self.now_sec() - self.last_vehicle_status_receive_sec
+            <= self.max_vehicle_status_age_sec
+        )
+
     def vehicle_local_position_callback(self, msg: VehicleLocalPosition) -> None:
         self.vehicle_local_position = msg
-        if self.hover_reference_captured or not (msg.xy_valid and msg.z_valid):
+        self.last_local_position_receive_sec = self.now_sec()
+        if self.hover_reference_captured or not self.local_position_is_valid(msg):
             return
         if self.now_sec() < self.reference_capture_ready_sec:
             return
@@ -119,6 +158,7 @@ class FixedPointHover(Node):
 
     def vehicle_status_callback(self, msg: VehicleStatus) -> None:
         self.vehicle_status = msg
+        self.last_vehicle_status_receive_sec = self.now_sec()
         self.armed = msg.arming_state == VehicleStatus.ARMING_STATE_ARMED
         if self.armed:
             self.waiting_for_manual_arm_logged = False
@@ -182,6 +222,16 @@ class FixedPointHover(Node):
                     "Waiting for valid PX4 local position before Offboard mode command."
                 )
             return
+
+        if not self.local_position_is_fresh() or not self.vehicle_status_is_fresh():
+            if not self.waiting_for_fresh_state_logged:
+                self.waiting_for_fresh_state_logged = True
+                self.get_logger().warning(
+                    "Waiting for fresh valid PX4 local position and vehicle status "
+                    "before arm/Offboard requests."
+                )
+            return
+        self.waiting_for_fresh_state_logged = False
 
         if not self.armed:
             if self.auto_arm and now_us - self.last_arm_request_time > 1_000_000:
