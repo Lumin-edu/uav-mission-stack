@@ -47,6 +47,14 @@ class PackageContractTest(unittest.TestCase):
         self.assertIn(
             "make_position_target(self.target_enu, self.target_yaw)", controller
         )
+        self.assertIn("orientation=orientation_values", controller)
+
+    def test_task_coordinates_are_converted_once_from_captured_heading(self) -> None:
+        contract = (ROOT / "scripts/mavros_setpoint_contract.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("body_flu = (y_forward, -x_right, z_up)", contract)
+        self.assertIn("Extract yaw only", contract)
 
 
 if __name__ == "__main__":

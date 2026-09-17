@@ -1,5 +1,6 @@
 /**:
   ros__parameters:
+    # Task frame: x=right, y=forward, z=up, relative to the pose captured at 3 s.
     target_x: 0.0
     target_y: 0.0
     target_z: 1.0
@@ -7,7 +8,6 @@
     hold_current_yaw: true
     auto_arm: false
     auto_offboard: true
-    use_current_position_reference: true
     reference_capture_delay_sec: 3.0
     control_rate_hz: 50.0
     prestream_sec: 2.0

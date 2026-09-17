@@ -29,7 +29,7 @@ class FixedPointMavros(Node):
         super().__init__("fixed_point_mavros")
         self.target_x = float(self.declare_parameter("target_x", 0.0).value)
         self.target_y = float(self.declare_parameter("target_y", 0.0).value)
-        # target_z is an ENU altitude delta when use_current_position_reference is true.
+        # Task coordinates are (right, forward, up) relative to the captured pose.
         self.target_z = float(self.declare_parameter("target_z", 1.0).value)
         self.configured_yaw = float(self.declare_parameter("target_yaw", 0.0).value)
         self.hold_current_yaw = bool(
@@ -37,9 +37,6 @@ class FixedPointMavros(Node):
         )
         self.auto_arm = bool(self.declare_parameter("auto_arm", False).value)
         self.auto_offboard = bool(self.declare_parameter("auto_offboard", True).value)
-        self.use_current_position_reference = bool(
-            self.declare_parameter("use_current_position_reference", True).value
-        )
         self.reference_capture_delay_sec = float(
             self.declare_parameter("reference_capture_delay_sec", 3.0).value
         )
@@ -88,6 +85,7 @@ class FixedPointMavros(Node):
         self.state = State()
         self.reference_enu: tuple[float, float, float] | None = None
         self.target_enu: tuple[float, float, float] | None = None
+        self.reference_orientation: tuple[float, float, float, float] | None = None
         self.target_yaw: float | None = resolve_yaw(
             None,
             configured_yaw=self.configured_yaw,
@@ -98,7 +96,7 @@ class FixedPointMavros(Node):
         self.target_enu = resolve_target(
             None,
             (self.target_x, self.target_y, self.target_z),
-            use_current_position_reference=self.use_current_position_reference,
+            orientation=None,
         )
         self.last_request = 0.0
         self.timer = self.create_timer(1.0 / self.control_rate_hz, self.timer_callback)
@@ -119,8 +117,14 @@ class FixedPointMavros(Node):
             return
         if self.reference_enu is None and time.monotonic() >= self.reference_ready_at:
             orientation = msg.pose.pose.orientation
+            orientation_values = (
+                float(orientation.x),
+                float(orientation.y),
+                float(orientation.z),
+                float(orientation.w),
+            )
             captured_yaw = resolve_yaw(
-                (orientation.x, orientation.y, orientation.z, orientation.w),
+                orientation_values,
                 configured_yaw=self.configured_yaw,
                 hold_current_yaw=self.hold_current_yaw,
             )
@@ -130,14 +134,17 @@ class FixedPointMavros(Node):
                 )
                 return
             self.reference_enu = values
+            self.reference_orientation = orientation_values
             self.target_enu = resolve_target(
                 values,
                 (self.target_x, self.target_y, self.target_z),
-                use_current_position_reference=self.use_current_position_reference,
+                orientation=orientation_values,
             )
             self.target_yaw = captured_yaw
             self.get_logger().info(
-                f"Captured MAVROS ENU reference {values}; target ENU={self.target_enu}; "
+                f"Captured MAVROS local reference {values}; task target="
+                f"({self.target_x:.2f}, {self.target_y:.2f}, {self.target_z:.2f}) "
+                f"(right, forward, up); fixed target local={self.target_enu}; "
                 f"hold yaw={self.target_yaw:.3f} rad"
             )
             # The pre-stream requirement starts once a usable target exists.

@@ -28,13 +28,46 @@ def resolve_target(
     reference: tuple[float, float, float] | None,
     target: tuple[float, float, float],
     *,
-    use_current_position_reference: bool,
+    orientation: tuple[float, float, float, float] | None,
 ) -> tuple[float, float, float] | None:
-    if not use_current_position_reference:
-        return tuple(float(value) for value in target)
-    if reference is None:
+    offset_local = task_offset_to_local_enu(target, orientation)
+    if reference is None or offset_local is None:
         return None
-    return tuple(float(reference[i] + target[i]) for i in range(3))
+    return tuple(float(reference[i] + offset_local[i]) for i in range(3))
+
+
+def task_offset_to_local_enu(
+    task_offset: tuple[float, float, float],
+    orientation: tuple[float, float, float, float] | None,
+) -> tuple[float, float, float] | None:
+    """Convert task (right, forward, up) to a fixed local ENU/world offset.
+
+    Point-LIO's body frame is ROS FLU (forward, left, up), so the task offset
+    first becomes ``(forward, left, up) = (task_y, -task_x, task_z)``.  The
+    yaw extracted from the captured odometry quaternion then rotates that body
+    vector into the odom world frame.  The result is fixed at capture time; it
+    is not recomputed from the vehicle's subsequent attitude.
+    """
+    if orientation is None or len(orientation) != 4:
+        return None
+    x_right, y_forward, z_up = (float(value) for value in task_offset)
+    body_flu = (y_forward, -x_right, z_up)
+    qx, qy, qz, qw = (float(value) for value in orientation)
+    if not all(math.isfinite(value) for value in (*body_flu, qx, qy, qz, qw)):
+        return None
+    # Task right/forward axes are horizontal axes of the level capture
+    # heading.  Extract yaw only so a transient roll/pitch cannot tilt the
+    # task's z-up direction or introduce a horizontal component.
+    yaw = quaternion_to_yaw((qx, qy, qz, qw))
+    if yaw is None:
+        return None
+    c = math.cos(yaw)
+    s = math.sin(yaw)
+    return (
+        body_flu[0] * c - body_flu[1] * s,
+        body_flu[0] * s + body_flu[1] * c,
+        body_flu[2],
+    )
 
 
 def quaternion_to_yaw(

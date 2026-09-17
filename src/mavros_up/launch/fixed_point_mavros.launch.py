@@ -67,9 +67,6 @@ def generate_launch_description():
                 "hold_current_yaw": LaunchConfiguration("hold_current_yaw"),
                 "auto_arm": LaunchConfiguration("auto_arm"),
                 "auto_offboard": LaunchConfiguration("auto_offboard"),
-                "use_current_position_reference": LaunchConfiguration(
-                    "use_current_position_reference"
-                ),
                 "reference_capture_delay_sec": LaunchConfiguration(
                     "reference_capture_delay_sec"
                 ),
@@ -137,17 +134,17 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "target_x",
             default_value="0.0",
-            description="Local ENU x offset from the position captured after the delay.",
+            description="Task x offset: right of the captured heading, in meters.",
         ),
         DeclareLaunchArgument(
             "target_y",
             default_value="0.0",
-            description="Local ENU y offset from the position captured after the delay.",
+            description="Task y offset: forward of the captured heading, in meters.",
         ),
         DeclareLaunchArgument(
             "target_z",
             default_value="1.0",
-            description="Local ENU z offset from the position captured after the delay.",
+            description="Task z offset: up from the captured position, in meters.",
         ),
         DeclareLaunchArgument(
             "target_yaw", default_value="0.0", description="Target yaw in radians."
@@ -166,11 +163,6 @@ def generate_launch_description():
             "auto_offboard",
             default_value="true",
             description="Request OFFBOARD after setpoint pre-stream and arming.",
-        ),
-        DeclareLaunchArgument(
-            "use_current_position_reference",
-            default_value="true",
-            description="Interpret target values as offsets from the first valid local odometry.",
         ),
         DeclareLaunchArgument(
             "reference_capture_delay_sec",

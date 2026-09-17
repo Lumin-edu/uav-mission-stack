@@ -11,6 +11,7 @@ from mavros_setpoint_contract import (
     quaternion_to_yaw,
     resolve_target,
     resolve_yaw,
+    task_offset_to_local_enu,
 )
 
 
@@ -29,18 +30,46 @@ class MavrosSetpointTest(unittest.TestCase):
         self.assertAlmostEqual(fields.yaw, -0.8)
         self.assertEqual(fields.yaw_rate, 0.0)
 
-    def test_absolute_target_is_available_without_reference_odom(self) -> None:
+    def test_task_target_maps_right_forward_up_at_zero_heading(self) -> None:
         self.assertEqual(
-            resolve_target(None, (1.0, 2.0, 3.0), use_current_position_reference=False),
-            (1.0, 2.0, 3.0),
+            resolve_target(
+                (2.0, -1.0, 0.1),
+                (1.0, 2.0, 3.0),
+                orientation=(0.0, 0.0, 0.0, 1.0),
+            ),
+            (4.0, -2.0, 3.1),
         )
 
-    def test_relative_enu_target_adds_offset_to_captured_reference(self) -> None:
+    def test_task_target_rotates_with_captured_heading(self) -> None:
+        half_angle = math.pi / 4.0
+        result = resolve_target(
+            (2.0, -1.0, 0.1),
+            (1.0, 2.0, 3.0),
+            orientation=(0.0, 0.0, math.sin(half_angle), math.cos(half_angle)),
+        )
+        assert result is not None
+        for actual, expected in zip(result, (3.0, 1.0, 3.1)):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_task_offset_requires_a_valid_captured_orientation(self) -> None:
+        self.assertIsNone(task_offset_to_local_enu((1.0, 2.0, 3.0), None))
+
+    def test_task_frame_uses_heading_only_for_level_right_forward_up_axes(self) -> None:
+        half_roll = math.pi / 4.0
+        result = task_offset_to_local_enu(
+            (0.0, 0.0, 1.0),
+            (math.sin(half_roll), 0.0, 0.0, math.cos(half_roll)),
+        )
+        assert result is not None
+        for actual, expected in zip(result, (0.0, 0.0, 1.0)):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_relative_task_target_adds_offset_to_captured_reference(self) -> None:
         self.assertEqual(
             resolve_target(
                 (2.0, -1.0, 0.1),
                 (0.0, 0.0, 1.0),
-                use_current_position_reference=True,
+                orientation=(0.0, 0.0, 0.0, 1.0),
             ),
             (2.0, -1.0, 1.1),
         )
