@@ -1,0 +1,10 @@
+pointlio_to_mavros_vision_pose:
+  ros__parameters:
+    pointlio_odom_topic: /odom
+    vision_pose_topic: /mavros/vision_pose/pose
+    output_frame_id: odom
+    publish_rate_hz: 50.0
+    # Point-LIO base_link is the MID360 IMU origin. The vehicle center is
+    # expressed in that FLU frame as x-forward, y-left, z-up.
+    base_link_to_base_translation: [-0.011, -0.02329, -0.05588]
+    base_link_to_base_rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

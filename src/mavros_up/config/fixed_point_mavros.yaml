@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    target_x: 0.0
+    target_y: 0.0
+    target_z: 1.0
+    target_yaw: 0.0
+    hold_current_yaw: true
+    auto_arm: false
+    auto_offboard: true
+    use_current_position_reference: true
+    reference_capture_delay_sec: 3.0
+    control_rate_hz: 50.0
+    prestream_sec: 2.0
+    state_topic: /mavros/state
+    local_odom_topic: /mavros/local_position/odom
+    setpoint_topic: /mavros/setpoint_raw/local
+    arming_service: /mavros/cmd/arming
+    mode_service: /mavros/set_mode
