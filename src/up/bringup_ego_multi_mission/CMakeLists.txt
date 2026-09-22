@@ -16,7 +16,7 @@ install(FILES README.md
 install(PROGRAMS
   scripts/ego_px4_bridge.py
   scripts/ego_hw_monitor.py
-  scripts/rigid_odom_transform.py
+  scripts/planner_altitude_fusion.py
   scripts/pointlio_to_px4_visual_odom.py
   scripts/px4_dds_monitor.py
   scripts/px4_control_watchdog.py

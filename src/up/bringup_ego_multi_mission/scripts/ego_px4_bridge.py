@@ -6,14 +6,14 @@ EGO 规划器 → PX4 Offboard 桥接节点。
 转换到 PX4 NED 坐标系，并管理完整的 PX4 Offboard 进入/退出流程。
 
 工作流程：
-  1. 等待杆臂补偿后的无人机中心里程计和 PX4 本地位置就绪
+  1. 等待 EGO base 机体中心融合里程计和 PX4 本地位置就绪
   2. 捕获参考原点（EGO 世界系 + PX4 NED 系的对齐点）
   3. 若启用起飞，先飞到 takeoff_altitude 高度并稳定
   4. 起飞完成后，将 EGO 的 PositionCommand 逐步转换为 PX4 TrajectorySetpoint
   5. 如果 EGO 指令短暂丢失，保持最后安全位置（hold）
 
 坐标系说明：
-  - EGO 中心里程计使用 ROS 标准系：x=前, y=左, z=上，位置对应 base
+  - EGO 融合里程计使用 ROS 标准系：x=前, y=左, z=上，位置对应 base
   - PX4 NED：x=前(N), y=右(E), z=下(D)
   - 转换矩阵 world_to_px4_rotation = [1,0,0, 0,-1,0, 0,0,-1]
     将 ROS 的 (前,左,上) 映射到 NED 的 (前,右,下)
@@ -123,6 +123,9 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_topic = str(
             self.declare_parameter("takeoff_ready_topic", "/ego/takeoff_ready").value
         )
+        self.localization_health_topic = str(
+            self.declare_parameter("localization_health_topic", "").value
+        )
         if self.control_mode not in {"position", "velocity"}:
             raise ValueError("control_mode must be 'position' or 'velocity'")
         if self.offboard_prestream_sec <= 0.0:
@@ -187,7 +190,7 @@ class EgoPx4Bridge(Node):
         self.ego_command_topic = str(
             self.declare_parameter("ego_command_topic", "/ego/position_cmd").value
         )
-        self.ego_odom_topic = str(self.declare_parameter("ego_odom_topic", "/ego/odom_base").value)
+        self.ego_odom_topic = str(self.declare_parameter("ego_odom_topic", "/odom").value)
         self.px4_position_topic = str(
             self.declare_parameter(
                 "px4_position_topic", "/fmu/out/vehicle_local_position"
@@ -241,6 +244,16 @@ class EgoPx4Bridge(Node):
         self.takeoff_ready_pub = self.create_publisher(
             Bool, self.takeoff_ready_topic, ready_qos
         )
+        self.localization_health_required = bool(self.localization_health_topic)
+        self.localization_healthy = not self.localization_health_required
+        if self.localization_health_required:
+            self.create_subscription(
+                Bool,
+                self.localization_health_topic,
+                self.localization_health_callback,
+                ready_qos,
+            )
+
         # ========== 订阅话题 ==========
         self.create_subscription(
             PositionCommand, self.ego_command_topic, self.ego_command_callback, command_qos
@@ -306,6 +319,14 @@ class EgoPx4Bridge(Node):
     def ego_command_callback(self, msg: PositionCommand) -> None:
         self.latest_command = msg
         self.latest_command_sec = self.now_sec()
+
+    def localization_health_callback(self, msg: Bool) -> None:
+        was_healthy = self.localization_healthy
+        self.localization_healthy = bool(msg.data)
+        if was_healthy and not self.localization_healthy:
+            self.get_logger().error(
+                "Planner altitude fusion is unhealthy; new EGO trajectory execution is inhibited."
+            )
 
     def ego_odom_callback(self, msg: Odometry) -> None:
         self.latest_ego_odom = msg
@@ -382,6 +403,8 @@ class EgoPx4Bridge(Node):
         同时初始化起飞原点和目标（target = origin - takeoff_altitude）。
         """
         if self.reference_world is not None or self.latest_ego_odom is None:
+            return
+        if not self.localization_healthy:
             return
         if self.now_sec() < self.reference_capture_ready_sec:
             return
@@ -767,6 +790,12 @@ class EgoPx4Bridge(Node):
         """
         # 步骤1：硬件安全门检查
         if not self.output_permitted:
+            return
+        if not self.localization_healthy:
+            if self.reference_world is not None:
+                self.publish_hold("Planner altitude fusion is unhealthy")
+            else:
+                self.warn_waiting("Waiting for healthy planner altitude fusion")
             return
         # 步骤2：等待参考原点
         if self.reference_world is None:
