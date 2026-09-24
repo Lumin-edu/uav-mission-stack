@@ -16,17 +16,17 @@
     "fsm/waypoint0_z": 0.5                 # 默认航点 z (m)
 
     # ========== Grid Map（栅格地图）参数 ==========
-    "grid_map/resolution": 0.1             # 地图分辨率 (m)
-    "grid_map/map_size_x": 15.0            # 地图大小 x (m)
-    "grid_map/map_size_y": 15.0            # 地图大小 y (m)
-    "grid_map/map_size_z": 5.0             # 地图大小 z (m)
-    "grid_map/local_update_range_x": 6.0   # 局部更新范围 x (m)
-    "grid_map/local_update_range_y": 6.0   # 局部更新范围 y (m)
+    "grid_map/resolution": 0.15             # 地图分辨率 (m)
+    "grid_map/map_size_x": 8.0            # 地图大小 x (m)
+    "grid_map/map_size_y": 8.0            # 地图大小 y (m)
+    "grid_map/map_size_z": 3.0             # 地图大小 z (m)
+    "grid_map/local_update_range_x": 4.0   # 局部更新范围 x (m)
+    "grid_map/local_update_range_y": 4.0   # 局部更新范围 y (m)
     "grid_map/local_update_range_z": 3.0   # 局部更新范围 z (m)
     # 0.275m 无人机半径 + 0.125m 初始水平安全边距 = 0.40m 膨胀
     "grid_map/obstacles_inflation": 0.40   # 障碍物膨胀半径 (m)
     "grid_map/local_map_margin": 10        # 局部地图边界余量
-    "grid_map/ground_height": -0.1        # 地面高度 (m)
+    "grid_map/ground_height": -0.03        # 地面高度 (m)
     "grid_map/use_depth_filter": false     # 是否使用深度滤波
     "grid_map/depth_filter_tolerance": 0.15
     "grid_map/depth_filter_maxdist": 8.0
@@ -41,7 +41,7 @@
     "grid_map/p_occ": 0.80                 # 占用判定阈值
     "grid_map/min_ray_length": 0.1
     "grid_map/max_ray_length": 8.0
-    "grid_map/virtual_ceil_height": 3.0    # 虚拟天花板高度 (m)
+    "grid_map/virtual_ceil_height": 1.5    # 虚拟天花板高度 (m)
     "grid_map/virtual_ceil_yp": 14.0
     "grid_map/virtual_ceil_yn": -14.0
     "grid_map/visualization_truncate_height": 2.5

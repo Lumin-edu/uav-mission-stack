@@ -5,7 +5,7 @@ EGO 自主避障硬件启动文件。
   1. Livox MID-360 激光雷达驱动
   2. Point-LIO 建图（里程计 + 点云）
   3. Point-LIO → PX4 视觉里程计桥接
-  4. base_link → base 静态外参 TF
+  4. 规划位姿融合：Point-LIO base 中心 XY/姿态 + PX4 测距融合 Z/VZ
   5. EGO 规划器 + 轨迹服务器
   6. ego_px4_bridge：EGO → PX4 Offboard 控制桥接
   7. 多航点 runner：按顺序发布任务目标
@@ -17,7 +17,7 @@ EGO 自主避障硬件启动文件。
     → Point-LIO /odom + /cloud_registered
     → base_link(IMU) 到 base(机体中心)杆臂补偿
     → (verified visual odom bridge) → PX4 EKF2 horizontal position
-    → (EGO planner uses raw Point-LIO z and registered cloud)
+    → (base XY/姿态 + PX4 range-aided z + 点云 z 对齐) → /ego/odom_fused
     → (EGO planner) → /ego/position_cmd
     → (ego_px4_bridge) → PX4 TrajectorySetpoint
 
@@ -47,7 +47,8 @@ def generate_launch_description():
 
     raw_odom_topic = LaunchConfiguration("odom_topic")
     raw_cloud_topic = LaunchConfiguration("cloud_topic")
-    base_odom_topic = LaunchConfiguration("base_odom_topic")
+    planner_odom_topic = LaunchConfiguration("planner_odom_topic")
+    planner_cloud_topic = LaunchConfiguration("planner_cloud_topic")
 
     # Point-LIO 的 base_link 是 MID360 IMU 原点，base 是无人机机体中心。
     # 数值桥接、EGO 规划输入和 TF 树共用同一组 T_base_link_base，避免
@@ -73,22 +74,6 @@ def generate_launch_description():
             "rviz": "false",
         }.items(),
         condition=IfCondition(LaunchConfiguration("use_pointlio")),
-    )
-
-    base_odom = Node(
-        package="bringup_ego_multi_mission",
-        executable="rigid_odom_transform.py",
-        name="pointlio_base_odom_transform",
-        output="screen",
-        parameters=[
-            {
-                "source_topic": raw_odom_topic,
-                "target_topic": base_odom_topic,
-                "target_child_frame": "base",
-                "base_link_to_base_translation": base_link_to_base_translation,
-                "base_link_to_base_rotation_xyzw": base_link_to_base_rotation_xyzw,
-            }
-        ],
     )
 
     # ========== Node 3: Point-LIO → PX4 视觉里程计桥接 ==========
@@ -132,11 +117,39 @@ def generate_launch_description():
         ],
     )
 
-    # ========== Node 4: base_link -> base 固定杆臂 TF ==========
-    # 数值适配器已经将 Point-LIO base_link/IMU 位姿补偿到 base；这里仅
-    # 发布同一外参对应的 TF，便于 RViz 和其它 ROS 节点查询。
+    # ========== Node 4: base-center XY/姿态 + PX4 range-aided Z ==========
+    # 规划适配层先把 Point-LIO base_link/IMU 位姿补偿到 base，再使用 PX4
+    # 测高反算 z，并用相同 z 校正量对齐世界系点云。
+    planner_altitude_fusion = Node(
+        package="bringup_ego_multi_mission",
+        executable="planner_altitude_fusion.py",
+        name="planner_altitude_fusion",
+        output="screen",
+        parameters=[
+            {
+                "raw_odom_topic": raw_odom_topic,
+                "raw_cloud_topic": raw_cloud_topic,
+                "px4_position_topic": "/fmu/out/vehicle_local_position",
+                "fused_odom_topic": planner_odom_topic,
+                "fused_cloud_topic": planner_cloud_topic,
+                "health_topic": "/ego/height_fusion_healthy",
+                "correction_topic": "/ego/pointlio_z_correction",
+                "vehicle_frame": "base",
+                "base_link_to_base_translation": base_link_to_base_translation,
+                "base_link_to_base_rotation_xyzw": base_link_to_base_rotation_xyzw,
+                "require_rangefinder": LaunchConfiguration("require_rangefinder_height"),
+                "max_px4_age_sec": 0.30,
+                "max_odom_age_sec": 0.30,
+                "max_correction_age_sec": 0.30,
+                "max_abs_correction_m": 3.0,
+                "print_rate_hz": 1.0,
+            }
+        ],
+    )
+
     # Point-LIO 动态发布 odom -> base_link；这里补齐固定的 base_link -> base。
-    # 静态 TF 用于补全 TF 树，PX4 视觉里程计桥接在数值入口使用同一外参。
+    # 静态 TF 用于补全 TF 树。planner_altitude_fusion 和 PX4 视觉里程计桥接
+    # 各自在数值入口使用同一外参，不读取该 TF，因此不会重复补偿。
     base_link_to_base_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
@@ -158,8 +171,7 @@ def generate_launch_description():
 
     # ========== Node 5: EGO 规划器 ==========
     # 使用 EGO-Planner 进行局部轨迹规划与避障
-    # 关键 remap：规划器使用杆臂补偿后的无人机中心里程计，点云保持
-    # Point-LIO 原始世界坐标，不做任何 Z 平移。
+    # 关键 remap：odom_world → base 中心融合位姿，grid_map/cloud → z 对齐点云
     planner = Node(
         package="ego_planner",
         executable="ego_planner_node",
@@ -182,9 +194,9 @@ def generate_launch_description():
             },
         ],
         remappings=[
-            ("odom_world", base_odom_topic),
-            ("grid_map/odom", base_odom_topic),
-            ("grid_map/cloud", raw_cloud_topic),
+            ("odom_world", planner_odom_topic),
+            ("grid_map/odom", planner_odom_topic),
+            ("grid_map/cloud", planner_cloud_topic),
             ("planning/bspline", "/ego/planning/bspline"),
             ("planning/data_display", "/ego/planning/data_display"),
             ("planning/broadcast_bspline_from_planner", "/ego/broadcast_bspline"),
@@ -218,7 +230,8 @@ def generate_launch_description():
         parameters=[
             {
                 "ego_command_topic": "/ego/position_cmd",
-                "ego_odom_topic": base_odom_topic,
+                "ego_odom_topic": planner_odom_topic,
+                "localization_health_topic": "/ego/height_fusion_healthy",
                 "output_enabled": LaunchConfiguration("output_enabled"),
                 "hardware_confirmation": LaunchConfiguration("hardware_confirmation"),
                 "auto_arm": LaunchConfiguration("auto_arm"),
@@ -257,7 +270,7 @@ def generate_launch_description():
     )
 
     # ========== Node 8: 多航点目标 runner ==========
-    # 这是本包唯一的 /move_base_simple/goal 发布者。它等待无人机中心里程计、
+    # 这是本包唯一的 /move_base_simple/goal 发布者。它等待融合里程计、
     # 稳定起飞和 EGO 订阅者，然后逐点发布并等待位置/速度稳定。
     route_runner = Node(
         package="bringup_ego_multi_mission",
@@ -270,7 +283,7 @@ def generate_launch_description():
             "--topic",
             "/move_base_simple/goal",
             "--odom-topic",
-            base_odom_topic,
+            planner_odom_topic,
             "--takeoff-ready-topic",
             "/ego/takeoff_ready",
             "--ready-timeout",
@@ -300,9 +313,11 @@ def generate_launch_description():
         output="screen",
         parameters=[
             {
-                "odom_topic": base_odom_topic,
-                "cloud_topic": raw_cloud_topic,
+                "odom_topic": planner_odom_topic,
+                "cloud_topic": planner_cloud_topic,
                 "command_topic": "/ego/position_cmd",
+                "height_fusion_health_topic": "/ego/height_fusion_healthy",
+                "require_rangefinder": LaunchConfiguration("require_rangefinder_height"),
                 "max_odom_age_sec": 0.30,
                 "max_cloud_age_sec": 0.50,
                 "max_command_age_sec": 0.30,
@@ -362,8 +377,12 @@ def generate_launch_description():
                 default_value=os.path.join(pointlio_share, "config", "mid360_mapping.yaml"),
             ),
             DeclareLaunchArgument("odom_topic", default_value="/odom"),
-            DeclareLaunchArgument("base_odom_topic", default_value="/ego/odom_base"),
             DeclareLaunchArgument("cloud_topic", default_value="/cloud_registered"),
+            DeclareLaunchArgument("planner_odom_topic", default_value="/ego/odom_fused"),
+            DeclareLaunchArgument(
+                "planner_cloud_topic", default_value="/ego/cloud_registered_fused"
+            ),
+            DeclareLaunchArgument("require_rangefinder_height", default_value="false"),
             DeclareLaunchArgument("map_frame", default_value="odom"),
             DeclareLaunchArgument("use_base_link_to_base_tf", default_value="true"),
             DeclareLaunchArgument(
@@ -384,20 +403,20 @@ def generate_launch_description():
             DeclareLaunchArgument("route_reach_z", default_value="0.20"),
             DeclareLaunchArgument("route_max_speed_xy", default_value="0.20"),
             DeclareLaunchArgument("route_max_speed_z", default_value="0.15"),
-            DeclareLaunchArgument("route_settle_sec", default_value="1.0"),
+            DeclareLaunchArgument("route_settle_sec", default_value="0.4"),
             DeclareLaunchArgument("route_waypoint_timeout_sec", default_value="90.0"),
             DeclareLaunchArgument("takeoff_before_ego", default_value="true"),
-            DeclareLaunchArgument("takeoff_altitude", default_value="0.30"),
+            DeclareLaunchArgument("takeoff_altitude", default_value="0.10"),
             DeclareLaunchArgument("takeoff_vertical_speed", default_value="0.20"),
             DeclareLaunchArgument("takeoff_reach_xy_tol", default_value="0.20"),
             DeclareLaunchArgument("takeoff_reach_z_tol", default_value="0.10"),
             DeclareLaunchArgument("takeoff_speed_xy_tol", default_value="0.20"),
             DeclareLaunchArgument("takeoff_speed_z_tol", default_value="0.15"),
-            DeclareLaunchArgument("takeoff_stable_sec", default_value="0.8"),
+            DeclareLaunchArgument("takeoff_stable_sec", default_value="0.4"),
             DeclareLaunchArgument("reference_capture_delay_sec", default_value="3.0"),
             DeclareLaunchArgument("lock_yaw_to_initial_heading", default_value="true"),
             DeclareLaunchArgument("max_velocity", default_value="0.3"),
-            DeclareLaunchArgument("max_acceleration", default_value="0.5"),
+            DeclareLaunchArgument("max_acceleration", default_value="0.8"),
             DeclareLaunchArgument(
                 "control_mode",
                 default_value="position",
@@ -418,8 +437,8 @@ def generate_launch_description():
             livox_driver,
             pointlio,
             pointlio_to_px4,
-            base_odom,
             base_link_to_base_tf,
+            planner_altitude_fusion,
             planner,
             trajectory_server,
             px4_bridge,

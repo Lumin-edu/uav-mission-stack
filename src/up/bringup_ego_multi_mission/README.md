@@ -1,16 +1,16 @@
 # bringup_ego_multi_mission
 
 实机 EGO 多任务点启动包。它将已经验证过的单任务实机节点、配置和坐标
-补偿逻辑复制到本包内独立维护，不依赖 `bringup_ego` 或
-`bringup_pointlio_hover`，也不修改 Point-LIO 或 EGO 源码。
+补偿逻辑复制到本包内独立维护，不依赖 `hx_bringup_ego` 或
+`hx_bringup_pointlio_hover`，也不修改 Point-LIO 或 EGO 源码。
 
 ## 数据链路
 
 ```text
 MID-360 -> Point-LIO /odom + /cloud_registered
          -> base_link(IMU) 到 base(机体中心)补偿
-         -> PX4 视觉里程计
-         -> /ego/odom_base + raw /cloud_registered (Point-LIO z used directly)
+         -> PX4 视觉里程计 + 高度融合
+         -> /ego/odom_fused + /ego/cloud_registered_fused
          -> EGO 局部规划
          -> /ego/position_cmd -> PX4 TrajectorySetpoint
 ```
@@ -59,15 +59,19 @@ source install/setup.bash
 
 ```bash
 ros2 launch bringup_ego_multi_mission ego_multi_mission_hw.launch.py \
-  use_livox_driver:=true \
+  use_livox_driver:=false \
   use_pointlio:=true \
+  hardware_confirmation:=ENABLE_PX4_OUTPUT \
+  auto_offboard:=true \
   use_pointlio_px4_visual_odom:=true \
-  output_enabled:=false \
+  require_rangefinder_height:=false \
+  output_enabled:=true \
   auto_arm:=false \
   start_with_waypoints:=true
 ```
 
-确认 `/odom`、`/ego/odom_base`、`/cloud_registered` 和 `/ego/position_cmd` 正常后，经过无桨检查再
+确认 `/ego/odom_fused`、`/ego/cloud_registered_fused`、
+`/ego/height_fusion_healthy` 和 `/ego/position_cmd` 正常后，经过无桨检查再
 开启 PX4 输出：
 
 ```bash

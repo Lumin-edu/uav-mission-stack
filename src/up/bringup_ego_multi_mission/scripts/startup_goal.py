@@ -2,11 +2,11 @@
 """
 EGO 启动目标发布节点。
 
-在杆臂补偿后的无人机中心里程计和起飞流程都就绪后，向 EGO 发布初始目标航点。
+在融合后的 base 机体中心里程计和起飞流程都就绪后，向 EGO 发布初始目标航点。
 这个节点只发布一次，然后退出。
 
 发布条件（三者同时满足）：
-  1. EGO 已收到有效的无人机中心里程计（/ego/odom_base）
+  1. EGO 已收到有效的 base 机体中心融合里程计
   2. 起飞已完成（takeoff_ready 信号为 True，若 wait_for_takeoff_ready=True）
   3. 等待 startup_delay_sec 秒后
   4. EGO 规划器已订阅目标话题
@@ -26,7 +26,7 @@ from std_msgs.msg import Bool
 
 class StartupGoal(Node):
     """
-    在无人机中心里程计和起飞就绪后发布一次性 EGO 目标。
+    在 base 中心融合里程计和起飞就绪后发布一次性 EGO 目标。
 
     用户参数使用任务坐标系：x_right=机头右侧, y_forward=机头前方, z_up=向上。
     内部自动转换为 EGO odom 的 ROS 标准系 (x=前, y=左, z=上) 后发布。
@@ -38,7 +38,7 @@ class StartupGoal(Node):
             self.declare_parameter("goal_topic", "/move_base_simple/goal").value
         )
         self.odom_topic = str(
-            self.declare_parameter("odom_topic", "/ego/odom_base").value
+            self.declare_parameter("odom_topic", "/odom").value
         )
         self.frame_id = str(self.declare_parameter("frame_id", "odom").value)
         # 用户任务坐标系参数：x=机头右侧, y=机头前方, z=向上
@@ -99,7 +99,7 @@ class StartupGoal(Node):
         每 0.1 秒检查一次发布条件。
 
         等待条件：
-          1. 杆臂补偿后的无人机中心里程计已有有效数据（odom_ready_at 不为 None）
+          1. base 机体中心融合里程计已有有效数据（odom_ready_at 不为 None）
           2. 起飞已完成就绪（takeoff_ready_at 不为 None）
           3. 等待 startup_delay_sec 秒
           4. EGO 规划器已订阅目标话题

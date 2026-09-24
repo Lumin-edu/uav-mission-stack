@@ -16,8 +16,8 @@ Visualization Manager:
       Alpha: 0.45
     - Class: rviz_default_plugins/PointCloud2
       Enabled: true
-      Name: Point-LIO Registered Cloud
-      Topic: /cloud_registered
+      Name: EGO Height-Fused Registered Cloud
+      Topic: /ego/cloud_registered_fused
       Queue Size: 10
       Size (Pixels): 2
       Style: Points
@@ -26,7 +26,7 @@ Visualization Manager:
       Alpha: 0.9
     - Class: rviz_default_plugins/PointCloud2
       Enabled: false
-      Name: Point-LIO Map (raw world cloud)
+      Name: Raw Point-LIO Map (Uncompensated Z)
       Topic: /map_cloud
       Queue Size: 5
       Size (Pixels): 2
@@ -46,8 +46,8 @@ Visualization Manager:
       Alpha: 0.75
     - Class: rviz_default_plugins/Odometry
       Enabled: true
-      Name: Aircraft-Center Odometry
-      Topic: /ego/odom_base
+      Name: EGO Height-Fused Odometry
+      Topic: /ego/odom_fused
       Keep: 1
       Shape:
         Value: Axes
@@ -55,7 +55,7 @@ Visualization Manager:
         Axes Radius: 0.04
     - Class: rviz_default_plugins/Path
       Enabled: false
-      Name: Point-LIO Path
+      Name: Raw Point-LIO Path (Uncompensated Z)
       Topic: /path
       Line Style: Lines
       Line Width: 0.05
