@@ -1,0 +1,20 @@
+/**:
+  ros__parameters:
+    # Task frame: x=right, y=forward, z=up, relative to the pose captured at 3 s.
+    target_x: 0.0
+    target_y: 0.0
+    target_z: 1.0
+    target_yaw: 0.0
+    hold_current_yaw: true
+    auto_arm: false
+    auto_offboard: true
+    reference_capture_delay_sec: 3.0
+    control_rate_hz: 50.0
+    prestream_sec: 2.0
+    max_speed: 0.8
+    state_topic: /mavros/state
+    local_odom_topic: /mavros/local_position/odom
+    setpoint_topic: /mavros/setpoint_position/local
+    arming_service: /mavros/cmd/arming
+    mode_service: /mavros/set_mode
+    fastlio_odom_topic: /Odometry

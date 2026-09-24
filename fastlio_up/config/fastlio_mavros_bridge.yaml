@@ -1,0 +1,10 @@
+fastlio_to_mavros_vision_pose:
+  ros__parameters:
+    fastlio_odom_topic: /Odometry
+    vision_pose_topic: /mavros/vision_pose/pose
+    output_frame_id: odom
+    publish_rate_hz: 50.0
+    # Keep the validated ROS 1 hover calibration: FAST-LIO body and vehicle
+    # control origin coincide. Fill this only after measuring a lever arm.
+    base_link_to_base_translation: [0.0, 0.0, 0.0]
+    base_link_to_base_rotation_xyzw: [0.0, 0.0, 0.0, 1.0]
